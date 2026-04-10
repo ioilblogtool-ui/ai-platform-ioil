@@ -178,7 +178,7 @@ export default function Dashboard() {
                 display: 'flex', alignItems: 'center', gap: 4,
                 padding: '6px 8px', borderRadius: 7, cursor: 'pointer',
                 background: activeConvId === c.id ? '#1e1e21' : 'transparent',
-                marginBottom: 2, group: 'true'
+                marginBottom: 2
               }}
             >
               <div onClick={() => openConversation(c.id)} style={{ flex: 1, fontSize: 12, color: activeConvId === c.id ? '#e8e6e1' : '#8a8784', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
