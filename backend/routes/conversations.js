@@ -71,6 +71,41 @@ router.get('/projects/list', requireAuth, async (req, res) => {
   res.json(data);
 });
 
+// GET /api/conversations/stats — 전체 토큰 통계
+router.get('/stats', requireAuth, async (req, res) => {
+  // 내 대화 ID 목록
+  const { data: convs, error: convErr } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('user_id', req.user.id);
+
+  if (convErr) return res.status(500).json({ error: convErr.message });
+
+  if (!convs || convs.length === 0) {
+    return res.json({ total_tokens: 0, conversation_count: 0 });
+  }
+
+  const convIds = convs.map(c => c.id);
+
+  const { data: msgs, error: msgErr } = await supabase
+    .from('messages')
+    .select('tokens_used, conversation_id')
+    .in('conversation_id', convIds);
+
+  if (msgErr) return res.status(500).json({ error: msgErr.message });
+
+  const total_tokens = (msgs || []).reduce((sum, m) => sum + (m.tokens_used || 0), 0);
+
+  // 대화별 토큰 집계
+  const per_conversation = {};
+  (msgs || []).forEach(m => {
+    if (!per_conversation[m.conversation_id]) per_conversation[m.conversation_id] = 0;
+    per_conversation[m.conversation_id] += m.tokens_used || 0;
+  });
+
+  res.json({ total_tokens, conversation_count: convs.length, per_conversation });
+});
+
 // POST /api/conversations/projects — 새 프로젝트 생성
 router.post('/projects', requireAuth, async (req, res) => {
   const { name, description, system_prompt } = req.body;

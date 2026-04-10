@@ -5,6 +5,7 @@ const cors = require('cors');
 const chatRoutes = require('./routes/chat');
 const conversationRoutes = require('./routes/conversations');
 const authRoutes = require('./routes/auth');
+const taskRoutes = require('./routes/tasks');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -28,6 +29,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/conversations', conversationRoutes);
+app.use('/api/tasks', taskRoutes);
 
 // 에러 핸들러
 app.use((err, req, res, next) => {
@@ -35,6 +37,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: '서버 오류가 발생했습니다.' });
 });
 
-app.listen(PORT, () => {
-  console.log(`서버 실행 중: http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`서버 실행 중: http://0.0.0.0:${PORT}`);
 });

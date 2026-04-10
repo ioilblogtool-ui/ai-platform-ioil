@@ -73,3 +73,38 @@ export async function createProject(params: {
     body: JSON.stringify(params),
   });
 }
+
+// 토큰 통계
+export async function getTokenStats() {
+  return apiFetch('/api/conversations/stats');
+}
+
+// 태스크 목록
+export async function getTasks(projectId: string) {
+  return apiFetch(`/api/tasks?project_id=${projectId}`);
+}
+
+// 태스크 생성
+export async function createTask(params: {
+  project_id: string;
+  title: string;
+  description?: string;
+  status?: 'todo' | 'in_progress' | 'done';
+  priority?: number;
+}) {
+  return apiFetch('/api/tasks', { method: 'POST', body: JSON.stringify(params) });
+}
+
+// 태스크 수정 (상태/우선순위 변경)
+export async function updateTask(id: string, params: {
+  title?: string;
+  status?: 'todo' | 'in_progress' | 'done';
+  priority?: number;
+}) {
+  return apiFetch(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(params) });
+}
+
+// 태스크 삭제
+export async function deleteTask(id: string) {
+  return apiFetch(`/api/tasks/${id}`, { method: 'DELETE' });
+}
