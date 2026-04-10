@@ -1,0 +1,21 @@
+# 환경변수 (절대 커밋 금지)
+.env
+.env.local
+.env.production
+.env*.local
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Next.js
+frontend/.next/
+frontend/out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
