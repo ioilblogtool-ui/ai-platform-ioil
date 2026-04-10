@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getContents, deleteContent } from '@/lib/api';
 import PageHeader from '@/components/PageHeader';
@@ -19,6 +19,14 @@ const PRIORITY_LABEL: Record<number, { label: string; color: string }> = {
 };
 
 export default function ContentsPage() {
+  return (
+    <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3a3850', fontSize: 13 }}>Loading...</div>}>
+      <ContentsInner />
+    </Suspense>
+  );
+}
+
+function ContentsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 

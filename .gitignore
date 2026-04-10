@@ -11,6 +11,7 @@ npm-debug.log*
 # Next.js
 frontend/.next/
 frontend/out/
+frontend/tsconfig.tsbuildinfo
 
 # OS
 .DS_Store
