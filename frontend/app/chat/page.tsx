@@ -189,7 +189,10 @@ export default function Dashboard() {
 
         {/* 로고 */}
         <div style={{ padding: '20px 16px 12px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-          <div style={{ fontSize: 18, fontWeight: 500, color: '#c8a96e' }}>AI Platform</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: 18, fontWeight: 500, color: '#c8a96e' }}>AI Platform</div>
+            <button onClick={() => router.push('/dashboard')} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 5, color: '#555350', fontSize: 10, padding: '3px 7px', cursor: 'pointer' }}>← Ops</button>
+          </div>
           <div style={{ fontSize: 11, color: '#555350', marginTop: 2 }}>{user?.email}</div>
         </div>
 

@@ -6,6 +6,15 @@ const chatRoutes = require('./routes/chat');
 const conversationRoutes = require('./routes/conversations');
 const authRoutes = require('./routes/auth');
 const taskRoutes = require('./routes/tasks');
+const contentsRoutes = require('./routes/contents');
+const documentsRoutes = require('./routes/documents');
+const generateRoutes = require('./routes/generate');
+const jobsRoutes = require('./routes/jobs');
+const gitRoutes = require('./routes/git');
+const deploymentsRoutes = require('./routes/deployments');
+const activityRoutes = require('./routes/activity');
+const promptsRoutes = require('./routes/prompts');
+const templatesRoutes = require('./routes/templates');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -25,11 +34,22 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// 라우트
+// 라우트 — 기존
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/tasks', taskRoutes);
+
+// 라우트 — Content Ops
+app.use('/api/contents', contentsRoutes);
+app.use('/api/documents', documentsRoutes);
+app.use('/api/generate', generateRoutes);
+app.use('/api/jobs', jobsRoutes);
+app.use('/api/git', gitRoutes);
+app.use('/api/deployments', deploymentsRoutes);
+app.use('/api/activity', activityRoutes);
+app.use('/api/prompts', promptsRoutes);
+app.use('/api/templates', templatesRoutes);
 
 // 에러 핸들러
 app.use((err, req, res, next) => {
