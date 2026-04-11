@@ -128,6 +128,19 @@ export type ContentType = 'calculator' | 'report';
 export type DocType = 'plan' | 'design' | 'dev_request';
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed';
 export type AIModel = 'claude' | 'gpt' | 'gemini' | 'codex';
+export type ContentIdea = {
+  id: string;
+  model: AIModel;
+  result_summary: string | null;
+  suggested_titles: string[] | null;
+  suggested_outline: string[] | null;
+  seo_keywords: string[] | null;
+  strengths: string | null;
+  weaknesses: string | null;
+  score: number | null;
+  is_selected: boolean;
+  created_at: string;
+};
 
 // =============================================
 // Contents
@@ -238,6 +251,14 @@ export async function deleteDocument(id: string) {
 
 export async function generateIdeas(content_item_id: string) {
   return apiFetch('/api/generate/ideas', { method: 'POST', body: JSON.stringify({ content_item_id }) });
+}
+
+export async function getContentIdeas(content_item_id: string) {
+  return apiFetch(`/api/ideas${buildQuery({ content_item_id })}`);
+}
+
+export async function selectContentIdea(id: string) {
+  return apiFetch(`/api/ideas/${id}/select`, { method: 'POST' });
 }
 
 export async function generatePlan(params: {

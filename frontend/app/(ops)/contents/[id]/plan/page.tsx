@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getContent, getDocuments, generatePlan, updateDocument, approveDocument, getJobs, getTemplates } from '@/lib/api';
+import { getContent, getDocuments, generatePlan, updateDocument, approveDocument, getJobs, getTemplates, getContentIdeas } from '@/lib/api';
 import Card, { CardHeader, CardTitle } from '@/components/Card';
 import Button from '@/components/Button';
 import { DocStatusBadge } from '@/components/StatusBadge';
@@ -17,6 +17,7 @@ export default function ContentPlanPage() {
   const [content, setContent] = useState<any>(null);
   const [doc, setDoc] = useState<any>(null);
   const [editorContent, setEditorContent] = useState('');
+  const [selectedIdeaTitle, setSelectedIdeaTitle] = useState('');
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -47,6 +48,12 @@ export default function ContentPlanPage() {
     try {
       const [c] = await Promise.all([getContent(id)]);
       setContent(c);
+      try {
+        const ideas = await getContentIdeas(id);
+        const selectedIdea = ideas?.find((idea: any) => idea.is_selected) || ideas?.[0];
+        const title = Array.isArray(selectedIdea?.suggested_titles) ? selectedIdea.suggested_titles[0] : '';
+        setSelectedIdeaTitle(title || '');
+      } catch {}
       await loadDocuments();
     } catch {}
     setInitialLoading(false);
