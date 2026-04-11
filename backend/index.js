@@ -16,6 +16,7 @@ const deploymentsRoutes = require('./routes/deployments');
 const activityRoutes = require('./routes/activity');
 const promptsRoutes = require('./routes/prompts');
 const templatesRoutes = require('./routes/templates');
+const { startScheduler } = require('./lib/scheduler');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -61,4 +62,5 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`서버 실행 중: http://0.0.0.0:${PORT}`);
+  startScheduler();
 });
