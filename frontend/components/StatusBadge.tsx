@@ -1,6 +1,6 @@
 export type ContentStatus = 'idea' | 'planned' | 'designed' | 'ready_dev' | 'in_dev' | 'deployed' | 'archived';
 export type DocStatus = 'draft' | 'reviewed' | 'approved';
-export type JobStatus = 'queued' | 'running' | 'done' | 'failed';
+export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'skipped';
 export type DeployStatus = 'pending' | 'success' | 'failed';
 
 export const CONTENT_STATUS: Record<ContentStatus, { label: string; color: string; bg: string; border: string }> = {
@@ -24,6 +24,7 @@ export const JOB_STATUS: Record<JobStatus, { label: string; color: string; bg: s
   running: { label: 'Running', color: '#fbbf24', bg: '#fbbf2410', border: '#fbbf2430' },
   done:    { label: 'Done',    color: '#4ade80', bg: '#4ade8010', border: '#4ade8030' },
   failed:  { label: 'Failed',  color: '#f87171', bg: '#f8717110', border: '#f8717130' },
+  skipped: { label: 'Skipped', color: '#4b5563', bg: '#4b556310', border: '#4b556330' },
 };
 
 export const DEPLOY_STATUS: Record<DeployStatus, { label: string; color: string; glow: string }> = {

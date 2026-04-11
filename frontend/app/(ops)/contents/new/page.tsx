@@ -2,26 +2,35 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createContent, generateIdeas } from '@/lib/api';
+import { createContent, generateIdeas, checkSimilarity } from '@/lib/api';
 import PageHeader from '@/components/PageHeader';
 import Card, { CardTitle } from '@/components/Card';
 import Button from '@/components/Button';
 
 const STEPS = ['Basic Info', 'Idea Input', 'AI Generate', 'Select Result'];
-const CATEGORIES = ['연봉/임금', '투자/ETF', '부동산', '세금/절세', '노후/연금', '육아/교육', '보험', '기타'];
+const CATEGORIES = ['연봉/임금', '투자/ETF', '부동산', '세금/절세', '노후/연금', '육아/교육', '보험', '자동차', '생활비', '기타'];
 const PRIORITIES = [
   { value: 2, label: '높음', color: '#f87171' },
   { value: 1, label: '보통', color: '#fbbf24' },
   { value: 0, label: '낮음', color: '#4ade80' },
 ];
 
+type SimilarityResult = {
+  score: number;
+  level: 'ok' | 'warn' | 'block';
+  reason: string;
+  similar_item: { id: string; title: string; content_type: string; status: string } | null;
+};
+
 export default function NewContentPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [generatedIdea, setGeneratedIdea] = useState<any>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [similarityResult, setSimilarityResult] = useState<SimilarityResult | null>(null);
 
   const [form, setForm] = useState({
     title: '',
@@ -35,7 +44,32 @@ export default function NewContentPage() {
     notes: '',
   });
 
-  const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
+  const set = (k: string, v: any) => {
+    setForm(f => ({ ...f, [k]: v }));
+    // 제목/키워드 변경 시 유사도 결과 초기화
+    if (k === 'title' || k === 'seo_keyword') setSimilarityResult(null);
+  };
+
+  async function handleNextStep() {
+    setChecking(true);
+    setSimilarityResult(null);
+    try {
+      const result = await checkSimilarity({
+        title: form.title,
+        seo_keyword: form.seo_keyword,
+        content_type: form.content_type,
+      });
+      if (result.level === 'ok') {
+        setStep(1);
+      } else {
+        setSimilarityResult(result);
+      }
+    } catch {
+      // 체크 실패 시 그냥 통과
+      setStep(1);
+    }
+    setChecking(false);
+  }
 
   async function handleCreate() {
     setSaving(true);
@@ -169,12 +203,28 @@ export default function NewContentPage() {
                   </Field>
                 </div>
 
+                {/* 유사도 체크 결과 */}
+                {similarityResult && similarityResult.level !== 'ok' && (
+                  <SimilarityBanner result={similarityResult} onForce={() => setStep(1)} />
+                )}
+
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
                   <Button variant="ghost" onClick={() => router.push('/contents')}>취소</Button>
-                  <Button variant="primary" onClick={() => setStep(1)} disabled={!step1Valid} style={{ opacity: step1Valid ? 1 : 0.4 }}>
-                    다음 →
+                  <Button
+                    variant="primary"
+                    onClick={handleNextStep}
+                    disabled={!step1Valid || checking}
+                    style={{ opacity: step1Valid ? 1 : 0.4, minWidth: 100 }}
+                  >
+                    {checking ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ width: 10, height: 10, border: '2px solid #1a1208', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />
+                        검사 중...
+                      </span>
+                    ) : '다음 →'}
                   </Button>
                 </div>
+                <style dangerouslySetInnerHTML={{ __html: '@keyframes spin{to{transform:rotate(360deg)}}' }} />
               </div>
             </Card>
           )}
@@ -219,7 +269,6 @@ export default function NewContentPage() {
             </Card>
           )}
 
-          {/* Step 2 → 3 transition is handled by handleCreate which sets step=2 after content is created */}
           {/* Step 3: Generate */}
           {step === 2 && (
             <Card>
@@ -262,14 +311,12 @@ export default function NewContentPage() {
               <div style={{ marginTop: 4, fontSize: 12, color: '#3a3850' }}>Claude가 생성한 콘텐츠 기획안입니다.</div>
 
               <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {/* Summary */}
                 <div style={{ padding: '14px', borderRadius: 10, background: 'rgba(200,169,110,0.05)', border: '1px solid rgba(200,169,110,0.12)' }}>
                   <div style={{ fontSize: 10, color: '#c8a96e', marginBottom: 6, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Summary</div>
                   <div style={{ fontSize: 13, color: '#c8c6c0', lineHeight: 1.6 }}>{generatedIdea.result_summary}</div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  {/* Titles */}
                   {generatedIdea.suggested_titles?.length > 0 && (
                     <div style={{ padding: '14px', borderRadius: 10, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
                       <div style={{ fontSize: 10, color: '#60a5fa', marginBottom: 8, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Suggested Titles</div>
@@ -279,7 +326,6 @@ export default function NewContentPage() {
                     </div>
                   )}
 
-                  {/* Outline */}
                   {generatedIdea.suggested_outline?.length > 0 && (
                     <div style={{ padding: '14px', borderRadius: 10, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
                       <div style={{ fontSize: 10, color: '#a78bfa', marginBottom: 8, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Outline</div>
@@ -292,7 +338,6 @@ export default function NewContentPage() {
                   )}
                 </div>
 
-                {/* Keywords + Score */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   {generatedIdea.seo_keywords?.map((k: string) => (
                     <span key={k} style={{ fontSize: 11, color: '#4ade80', background: '#4ade8015', border: '1px solid #4ade8030', borderRadius: 20, padding: '3px 10px' }}>{k}</span>
@@ -329,6 +374,68 @@ export default function NewContentPage() {
         </div>
       </main>
     </>
+  );
+}
+
+// ── 유사도 경고/차단 배너 ────────────────────────────────────────────
+function SimilarityBanner({ result, onForce }: { result: SimilarityResult; onForce: () => void }) {
+  const isBlock = result.level === 'block';
+  const color   = isBlock ? '#f87171' : '#fbbf24';
+  const bg      = isBlock ? 'rgba(248,113,113,0.06)' : 'rgba(251,191,36,0.06)';
+  const border  = isBlock ? 'rgba(248,113,113,0.2)' : 'rgba(251,191,36,0.2)';
+  const icon    = isBlock ? '🚫' : '⚠️';
+
+  return (
+    <div style={{ padding: '16px', borderRadius: 10, background: bg, border: `1px solid ${border}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 16 }}>{icon}</span>
+        <span style={{ fontSize: 13, color, fontWeight: 600 }}>
+          {isBlock ? '유사한 콘텐츠가 이미 있습니다' : '비슷한 콘텐츠가 존재합니다'}
+        </span>
+        <span style={{ fontSize: 11, color, background: `${color}20`, border: `1px solid ${color}40`, borderRadius: 12, padding: '2px 8px', marginLeft: 4, fontFamily: 'monospace' }}>
+          유사도 {result.score}%
+        </span>
+      </div>
+
+      {result.reason && (
+        <div style={{ fontSize: 12, color: '#9a98a8', marginBottom: 10, lineHeight: 1.5 }}>
+          {result.reason}
+        </div>
+      )}
+
+      {result.similar_item && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', marginBottom: 12 }}>
+          <span style={{ fontSize: 10, color: '#5a5870', background: 'rgba(255,255,255,0.05)', borderRadius: 4, padding: '2px 6px' }}>
+            {result.similar_item.content_type}
+          </span>
+          <span style={{ fontSize: 13, color: '#c8c6c0', flex: 1 }}>{result.similar_item.title}</span>
+          <span style={{ fontSize: 10, color: '#5a5870' }}>{result.similar_item.status}</span>
+          <a
+            href={`/contents/${result.similar_item.id}/overview`}
+            target="_blank"
+            rel="noreferrer"
+            style={{ fontSize: 11, color: '#60a5fa', textDecoration: 'none' }}
+          >
+            보기 ↗
+          </a>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        {!isBlock && (
+          <button onClick={onForce} style={{
+            fontSize: 11, color: '#fbbf24',
+            background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)',
+            borderRadius: 7, padding: '5px 14px', cursor: 'pointer',
+          }}>
+            그래도 계속 진행
+          </button>
+        )}
+        <span style={{ fontSize: 11, color: '#5a5870', display: 'flex', alignItems: 'center' }}>
+          {isBlock ? '제목을 수정해주세요' : '제목을 수정하거나 계속 진행하세요'}
+        </span>
+      </div>
+    </div>
   );
 }
 

@@ -54,8 +54,8 @@ export default function ContentDeployPage() {
 
   async function loadData() {
     try {
-      const data = await getDeployments({ content_item_id: id });
-      setDeployments(Array.isArray(data) ? data : []);
+      const res = await getDeployments({ content_item_id: id });
+      setDeployments(Array.isArray(res) ? res : (res?.data ?? []));
     } catch {}
     setLoading(false);
   }

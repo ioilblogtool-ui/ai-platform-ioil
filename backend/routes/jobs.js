@@ -37,6 +37,28 @@ router.get('/:id', requireAuth, async (req, res) => {
   res.json(data);
 });
 
+// POST /api/jobs/:id/skip — 실패/Queued job 스킵 처리
+router.post('/:id/skip', requireAuth, async (req, res) => {
+  const { data: job } = await supabase
+    .from('generation_jobs')
+    .select('*')
+    .eq('id', req.params.id)
+    .eq('user_id', req.user.id)
+    .single();
+
+  if (!job) return res.status(404).json({ error: 'Job을 찾을 수 없습니다.' });
+  if (!['failed', 'queued'].includes(job.status)) {
+    return res.status(400).json({ error: 'Failed 또는 Queued 상태만 스킵할 수 있습니다.' });
+  }
+
+  await supabase
+    .from('generation_jobs')
+    .update({ status: 'skipped' })
+    .eq('id', req.params.id);
+
+  res.json({ success: true });
+});
+
 // POST /api/jobs/:id/retry — 실패한 job 재시도
 router.post('/:id/retry', requireAuth, async (req, res) => {
   const { data: job } = await supabase

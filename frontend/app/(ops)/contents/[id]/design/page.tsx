@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getDocuments, generateDesign, updateDocument, approveDocument, getJobs } from '@/lib/api';
+import { getContent, getDocuments, generateDesign, updateDocument, approveDocument, getJobs, getTemplates } from '@/lib/api';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import { DocStatusBadge } from '@/components/StatusBadge';
@@ -14,6 +14,7 @@ export default function ContentDesignPage() {
   const params = useParams();
   const id = params.id as string;
 
+  const [content, setContent] = useState<any>(null);
   const [doc, setDoc] = useState<any>(null);
   const [planDoc, setPlanDoc] = useState<any>(null);
   const [mode, setMode] = useState<'edit' | 'preview' | 'split'>('split');
@@ -42,6 +43,10 @@ export default function ContentDesignPage() {
   useEffect(() => { loadData(); }, [id]);
 
   async function loadData() {
+    try {
+      const c = await getContent(id);
+      setContent(c);
+    } catch {}
     await loadDocuments();
     setInitialLoading(false);
   }
@@ -73,7 +78,14 @@ export default function ContentDesignPage() {
   async function handleGenerate() {
     setGenerating(true);
     try {
-      const res = await generateDesign({ content_item_id: id, plan_doc_id: planDoc?.id });
+      let templateContent = '';
+      try {
+        const tpls = await getTemplates({ doc_type: 'design', content_type: content?.content_type });
+        const def = tpls?.find((t: any) => t.is_default) || tpls?.[0];
+        if (def) templateContent = def.content;
+      } catch {}
+
+      const res = await generateDesign({ content_item_id: id, plan_doc_id: planDoc?.id, template_content: templateContent });
       setActiveJobId(res.job_id);
     } catch (e: any) {
       alert(e.message);

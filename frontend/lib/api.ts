@@ -126,7 +126,7 @@ export async function deleteTask(id: string) {
 export type ContentStatus = 'idea' | 'planned' | 'designed' | 'ready_dev' | 'in_dev' | 'deployed' | 'archived';
 export type ContentType = 'calculator' | 'report';
 export type DocType = 'plan' | 'design' | 'dev_request';
-export type JobStatus = 'queued' | 'running' | 'done' | 'failed';
+export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'skipped';
 export type AIModel = 'claude' | 'gpt' | 'gemini' | 'codex';
 export type ContentIdea = {
   id: string;
@@ -163,6 +163,32 @@ export async function getContentStats() {
 
 export async function getContent(id: string) {
   return apiFetch(`/api/contents/${id}`);
+}
+
+export async function checkSimilarity(params: {
+  title: string;
+  seo_keyword?: string;
+  content_type?: string;
+}): Promise<{
+  score: number;
+  level: 'ok' | 'warn' | 'block';
+  reason: string;
+  similar_item: { id: string; title: string; content_type: string; status: string } | null;
+}> {
+  return apiFetch('/api/contents/check-similarity', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function autoGenerateIdeas(): Promise<{
+  today_category: string;
+  items: Array<{
+    item: { id: string; title: string; content_type: string; category: string };
+    idea: { result_summary: string; suggested_titles: string[]; seo_keywords: string[]; score: number } | null;
+    scores: { search: number; revenue: number; internal_link: number; difficulty: number; total: number };
+    affiliate_hint: string;
+    series_expansion: string;
+  }>;
+}> {
+  return apiFetch('/api/contents/auto-generate', { method: 'POST' });
 }
 
 export async function createContent(params: {
@@ -271,6 +297,7 @@ export async function generatePlan(params: {
 export async function generateDesign(params: {
   content_item_id: string;
   plan_doc_id?: string;
+  template_content?: string;
 }) {
   return apiFetch('/api/generate/design', { method: 'POST', body: JSON.stringify(params) });
 }
@@ -303,6 +330,10 @@ export async function getJob(id: string) {
 
 export async function retryJob(id: string) {
   return apiFetch(`/api/jobs/${id}/retry`, { method: 'POST' });
+}
+
+export async function skipJob(id: string) {
+  return apiFetch(`/api/jobs/${id}/skip`, { method: 'POST' });
 }
 
 // =============================================

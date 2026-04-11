@@ -7,27 +7,45 @@ import Card, { EmptyState } from '@/components/Card';
 
 type ActivityItem = {
   id: string;
-  action: string;
-  actor: string;
+  event_type: string;
+  action?: string;
+  description?: string;
+  actor?: string;
   metadata?: Record<string, any>;
   created_at: string;
 };
 
 const ACTION_META: Record<string, { icon: string; label: string; color: string }> = {
-  created:            { icon: '◈', label: '생성',               color: '#c8a96e' },
-  status_changed:     { icon: '→', label: '상태 변경',           color: '#60a5fa' },
-  plan_generated:     { icon: '⚡', label: 'Plan 생성',          color: '#60a5fa' },
-  design_generated:   { icon: '⚡', label: 'Design 생성',        color: '#a78bfa' },
-  dev_request_generated: { icon: '⚡', label: 'Dev Request 생성', color: '#fb923c' },
-  ideas_generated:    { icon: '⚡', label: 'Ideas 생성',         color: '#c8a96e' },
-  document_approved:  { icon: '✓', label: '문서 승인',           color: '#4ade80' },
-  document_updated:   { icon: '✎', label: '문서 수정',           color: '#8b8fa8' },
-  git_linked:         { icon: '⎇', label: 'Git 연결',           color: '#fbbf24' },
-  deployed:           { icon: '↗', label: '배포',               color: '#4ade80' },
-  updated:            { icon: '✎', label: '정보 수정',           color: '#8b8fa8' },
+  // content
+  content_created:       { icon: '◈', label: '콘텐츠 생성',       color: '#c8a96e' },
+  created:               { icon: '◈', label: '생성',              color: '#c8a96e' },
+  status_changed:        { icon: '→', label: '상태 변경',          color: '#60a5fa' },
+  updated:               { icon: '✎', label: '정보 수정',          color: '#8b8fa8' },
+  // document generated — description으로 세분화
+  document_generated:    { icon: '⚡', label: '문서 생성',          color: '#c8a96e' },
+  plan_generated:        { icon: '⚡', label: 'Plan 생성',         color: '#60a5fa' },
+  design_generated:      { icon: '⚡', label: 'Design 생성',       color: '#a78bfa' },
+  dev_request_generated: { icon: '⚡', label: 'Dev Request 생성',  color: '#fb923c' },
+  // document approved
+  document_approved:     { icon: '✓', label: '문서 승인',          color: '#4ade80' },
+  document_updated:      { icon: '✎', label: '문서 수정',          color: '#8b8fa8' },
+  // ideas
+  idea_generated:        { icon: '💡', label: '아이디어 생성',      color: '#c8a96e' },
+  ideas_generated:       { icon: '💡', label: '아이디어 생성',      color: '#c8a96e' },
+  // git / deploy
+  git_linked:            { icon: '⎇', label: 'Git 연결',          color: '#fbbf24' },
+  deployed:              { icon: '↗', label: '배포',              color: '#4ade80' },
+  // job
+  job_failed:            { icon: '✕', label: '생성 실패',          color: '#f87171' },
 };
 
-function getActionMeta(action: string) {
+function getActionMeta(action: string, description?: string) {
+  // document_generated는 description으로 세분화
+  if (action === 'document_generated' && description) {
+    if (description.includes('plan'))        return { icon: '⚡', label: 'Plan 생성',        color: '#60a5fa' };
+    if (description.includes('design'))      return { icon: '⚡', label: 'Design 생성',      color: '#a78bfa' };
+    if (description.includes('dev_request')) return { icon: '⚡', label: 'Dev Request 생성', color: '#fb923c' };
+  }
   return ACTION_META[action] || { icon: '●', label: action, color: '#5a5870' };
 }
 
@@ -43,11 +61,15 @@ function formatRelative(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('ko-KR');
 }
 
-function renderMetadata(action: string, meta?: Record<string, any>): string | null {
+function renderMetadata(event_type: string, meta?: Record<string, any>): string | null {
   if (!meta) return null;
-  if (action === 'status_changed' && meta.from && meta.to) return `${meta.from} → ${meta.to}`;
-  if (action === 'git_linked' && meta.branch_name) return `branch: ${meta.branch_name}`;
-  if (action === 'deployed' && meta.platform) return `${meta.platform} / ${meta.environment || 'prod'}`;
+  if ((event_type === 'status_changed' || (meta.from && meta.to)) && meta.from && meta.to)
+    return `${meta.from} → ${meta.to}`;
+  if (event_type === 'document_approved' && meta.from && meta.to)
+    return `${meta.from} → ${meta.to}`;
+  if (event_type === 'git_linked' && meta.branch_name) return `branch: ${meta.branch_name}`;
+  if (event_type === 'deployed' && meta.platform) return `${meta.platform} / ${meta.environment || 'prod'}`;
+  if (meta.tokens_used) return `${meta.tokens_used.toLocaleString()} tokens`;
   if (meta.doc_type) return `${meta.doc_type} 문서`;
   return null;
 }
@@ -68,8 +90,8 @@ export default function ContentActivityPage() {
   async function loadData(offset: number) {
     setLoading(true);
     try {
-      const data = await getActivity({ content_item_id: id, limit: PAGE_SIZE + 1, offset });
-      const items: ActivityItem[] = Array.isArray(data) ? data : [];
+      const res = await getActivity({ content_item_id: id, limit: PAGE_SIZE + 1, offset });
+      const items: ActivityItem[] = Array.isArray(res) ? res : (res?.data ?? []);
       if (offset === 0) {
         setActivities(items.slice(0, PAGE_SIZE));
       } else {
@@ -113,8 +135,8 @@ export default function ContentActivityPage() {
                 </div>
 
                 {items.map(act => {
-                  const meta = getActionMeta(act.action);
-                  const detail = renderMetadata(act.action, act.metadata);
+                  const meta = getActionMeta(act.event_type, act.description);
+                  const detail = renderMetadata(act.event_type, act.metadata);
                   return (
                     <div key={act.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, paddingBottom: 14, position: 'relative', zIndex: 1 }}>
                       {/* Icon dot */}

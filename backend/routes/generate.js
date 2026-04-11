@@ -14,29 +14,119 @@ const PROJECT_CONTEXT = `
 - **배포**: Cloudflare Pages — main 브랜치 푸시 = 즉시 라이브
 - **레포**: https://github.com/ioilblogtool-ui/blog-tool
 
-### 계산기(calculator) 파일 구조 — 신규 추가 시 4개 파일 필요
+---
+
+### 계산기(calculator) 파일 구조 — 신규 추가 시 4개 파일
 \`\`\`
-src/pages/tools/{slug}/index.astro   # 페이지 템플릿
-src/data/tools.ts                    # 메타데이터 레지스트리 (항목 추가)
-src/scripts/{slug}.js                # 클라이언트 계산 로직
-src/styles/{slug}.scss               # 페이지 전용 스타일
+src/pages/tools/{slug}/index.astro   # 페이지 (SSG)
+src/data/tools.ts                    # 레지스트리에 항목 추가
+src/scripts/{slug}.js                # 클라이언트 계산 로직 (vanilla JS)
+src/styles/scss/pages/_{slug}.scss   # 페이지 전용 스타일
 \`\`\`
 
 ### 레이아웃 쉘 3종 (계산기용)
 - \`SimpleToolShell\` — 입력 → 결과 단순 구조
-- \`CompareToolShell\` — 두 항목 비교 구조
+- \`CompareToolShell\` — 두 항목 비교 구조 (입력 패널 ↔ 결과 패널)
 - \`TimelineToolShell\` — 시간축 기반 추이 구조
 
-### 리포트(report) 파일 구조
+---
+
+### 리포트(report) 파일 구조 — 신규 추가 시 6개 파일
 \`\`\`
-src/pages/reports/{slug}/index.astro  # 페이지
-src/data/reports.ts                   # 메타데이터 레지스트리
+src/data/{camelCaseSlug}.ts             # TypeScript 데이터 + 타입 정의
+src/pages/reports/{slug}/index.astro    # 14개 섹션 Astro 페이지
+src/styles/scss/pages/_{slug}.scss      # CSS prefix: {prefix}-
+public/scripts/{slug}.js               # 인터랙션 (accordion·탭·Chart.js)
+src/data/reports.ts                     # 레지스트리에 order: N으로 추가
+public/sitemap.xml                      # URL 항목 추가
 \`\`\`
+
+### CSS prefix 명명 규칙 (리포트)
+slug에서 숫자를 뺀 단어들의 첫 글자를 조합한다.
+예시:
+- teacher-salary-2026 → \`ts-\`  (teacher, salary)
+- police-salary-2026  → \`ps-\`  (police, salary)
+- nurse-salary-2026   → \`ns-\`  (nurse, salary)
+- ai-stack-cost       → \`asc-\` (ai, stack, cost)
+
+모든 CSS 클래스는 반드시 이 prefix로 시작한다.
+예: \`.ts-kpi-grid\`, \`.ts-level-card\`, \`.ts-hobong-table\`
+
+### 섹션 ID 컨벤션 (리포트)
+\`aria-labelledby="{prefix}-{section}-title"\`
+예: \`ts-hobong-title\`, \`ts-chart-title\`, \`ts-faq-title\`
+
+### TypeScript export 패턴 (리포트)
+\`\`\`ts
+export const {PREFIX}_META = { title, description } as const
+export const {PREFIX}_HERO_STATS = { kpi1, kpi2, ... } as const
+export const {ITEMS}: {TypeName}[] = [...]       // 메인 데이터
+export const {VARIANTS}: {TypeName}[] = [...]    // 비교 데이터
+\`\`\`
+
+### 리포트 표준 섹션 구조 (A~N)
+A. Hero (CalculatorHero — eyebrow / title / description)
+B. InfoNotice (데이터 기준 3~4줄: 출처·추정 기준·주의사항)
+C. KPI Cards (핵심 수치 4개, grid auto-fit minmax(145px,1fr))
+D. 메인 비교 (카드 그리드 — 직급/학교급/연차 등)
+E. 상세 테이블 (요약 테이블 + "전체 펼치기" 토글 버튼)
+F. 바 차트 (Chart.js, <canvas data-labels data-values>)
+G. 탭 UI (분류별 카드: 고정/역할/연간 등)
+H. 비교 테이블 (공립vs사립, 정규vs계약 등 2~3열)
+I. 시뮬레이션 차트 (연차별 추이 라인 차트, 컨트롤 버튼)
+J. 업무강도 비교 테이블 (색상 강도 셀: very-high/high/mid/low)
+K. 총보상 패키지 (기본급+수당+연금 추정 테이블)
+L. 진입경로 카드 그리드 (자격·시작 조건별)
+M. FAQ (accordion, FAQPage 스키마, 6~8개)
+N. 관련 링크 그리드 (6개) + SeoContent 컴포넌트
+
+### Chart.js 데이터 전달 방식
+\`\`\`html
+<canvas id="{prefix}-chart"
+  data-labels={JSON.stringify(labels)}
+  data-values={JSON.stringify(values)}
+></canvas>
+\`\`\`
+→ JS에서 \`canvas.dataset.labels\`로 읽어 Chart.js 초기화
 
 ### 배포 체크리스트
 - \`npm run build\` 성공 확인 후 커밋
-- main 머지 → Cloudflare Pages 자동 배포
+- main 브랜치 머지 → Cloudflare Pages 자동 배포
 `.trim();
+
+// ─── JSON 파싱 헬퍼 (마크다운 코드블록 자동 제거) ────────────────────────────────
+function parseJsonSafe(text) {
+  const stripped = text
+    .replace(/^```json?\s*/im, '')
+    .replace(/```\s*$/im, '')
+    .trim();
+  const match = stripped.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try { return JSON.parse(match[0]); } catch { return null; }
+}
+
+// ─── slug/prefix 유틸 ──────────────────────────────────────────────────────────
+/** target_path에서 slug 추출: /reports/teacher-salary-2026/ → teacher-salary-2026 */
+function extractSlug(targetPath = '') {
+  return targetPath
+    .replace(/^\/(reports|tools)\//, '')
+    .replace(/\/$/, '')
+    .trim();
+}
+
+/** slug → CSS prefix (숫자 단어 제외, 각 단어 첫 글자) */
+function slugToPrefix(slug) {
+  return slug
+    .split('-')
+    .filter(w => isNaN(parseInt(w[0], 10)) && w.length > 0)
+    .map(w => w[0])
+    .join('') + '-';
+}
+
+/** slug → camelCase (데이터 파일명용) */
+function slugToCamel(slug) {
+  return slug.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase());
+}
 
 // ─── 공통 유틸 ─────────────────────────────────────────────────────────────────
 
@@ -157,8 +247,7 @@ ${item.raw_idea || item.title}`;
     const result = response.content[0].text;
     const tokens_used = response.usage.input_tokens + response.usage.output_tokens;
 
-    let parsed = {};
-    try { parsed = JSON.parse(result); } catch { parsed = { result_summary: result }; }
+    const parsed = parseJsonSafe(result) || { result_summary: result };
 
     const { data: idea } = await supabase
       .from('content_ideas')
@@ -261,7 +350,7 @@ ${Array.isArray(selectedIdea.suggested_outline) ? selectedIdea.suggested_outline
 
 // ─── POST /api/generate/design ─────────────────────────────────────────────────
 router.post('/design', requireAuth, async (req, res) => {
-  const { content_item_id, plan_doc_id } = req.body;
+  const { content_item_id, plan_doc_id, template_content } = req.body;
   if (!content_item_id) return res.status(400).json({ error: 'content_item_id가 필요합니다.' });
 
   const { data: item } = await supabase
@@ -288,7 +377,8 @@ router.post('/design', requireAuth, async (req, res) => {
 화면 목록, 컴포넌트 구조, 데이터 모델, 상태 흐름을 포함하세요.
 계산기라면 3종 레이아웃 쉘(SimpleToolShell / CompareToolShell / TimelineToolShell) 중 적합한 것을 명시하세요.
 
-${PROJECT_CONTEXT}`;
+${PROJECT_CONTEXT}
+${template_content ? '\n\n다음 템플릿 구조를 참고하세요:\n' + template_content : ''}`;
 
   const userPrompt = `콘텐츠: ${item.title} (${item.content_type} / ${item.category})
 
@@ -362,29 +452,52 @@ router.post('/dev-request', requireAuth, async (req, res) => {
 
   const styleDesc = { implement: '신규 구현', modify: '기능 수정', refactor: '리팩토링' }[prompt_style] || '구현';
 
+  // slug / prefix / camelCase 자동 추출 (D)
+  const slug   = extractSlug(item.target_path);
+  const prefix = slug ? slugToPrefix(slug) : '';
+  const camel  = slug ? slugToCamel(slug)  : '';
+
+  // 콘텐츠 타입별 파일 목록 자동 생성
+  const fileList = item.content_type === 'report' && slug
+    ? `## 생성·수정할 파일 (6개)
+1. \`src/data/${camel}.ts\`  — TypeScript 데이터 + 타입 정의
+2. \`src/pages/reports/${slug}/index.astro\`  — 14개 섹션 페이지
+3. \`src/styles/scss/pages/_${slug}.scss\`  — CSS prefix: \`${prefix}\`
+4. \`public/scripts/${slug}.js\`  — 인터랙션 (accordion·탭·Chart.js)
+5. \`src/data/reports.ts\`  — 레지스트리에 항목 추가
+6. \`public/sitemap.xml\`  — URL 추가`
+    : item.content_type === 'calculator' && slug
+    ? `## 생성·수정할 파일 (4개)
+1. \`src/pages/tools/${slug}/index.astro\`  — 페이지 (SSG + React Island)
+2. \`src/data/tools.ts\`  — 레지스트리에 항목 추가
+3. \`src/scripts/${slug}.js\`  — 계산 로직
+4. \`src/styles/scss/pages/_${slug}.scss\`  — 전용 스타일`
+    : '';
+
   const systemPrompt = `당신은 시니어 개발 리드입니다.
 설계 문서를 바탕으로 ${target_model === 'claude' ? 'Claude Code' : target_model}에게 전달할 개발 요청 문서를 Markdown으로 작성합니다.
 목표, 참고 문서, 구현 요구사항, 수정 대상 파일, 완료 기준을 포함하세요.
 ${target_model === 'claude' ? 'Claude Code가 바로 실행할 수 있는 명확한 지시 형식으로 작성하세요.' : ''}
 
-${PROJECT_CONTEXT}
-
-개발 요청서 작성 시 반드시 포함할 항목:
-- 신규 계산기라면 생성할 4개 파일 경로 명시 (astro / tools.ts 등록 / js / scss)
-- 리포트라면 astro + reports.ts 등록 명시
-- 적합한 레이아웃 쉘 선택 이유
-- \`npm run build\` 성공 확인 후 main 머지 지시`;
+${PROJECT_CONTEXT}`;
 
   const userPrompt = `작업 유형: ${styleDesc}
 대상 모델: ${target_model}
 콘텐츠: ${item.title} (${item.content_type} / ${item.category})
+slug: ${slug || '미지정'}
+CSS prefix: ${prefix || '미지정'}
 레포: ${item.target_repo || '미지정'}
 경로: ${item.target_path || '미지정'}
+
+${fileList}
 
 설계 문서:
 ${designContent || '(설계 문서 없음 — 콘텐츠 정보를 바탕으로 개발 요청서를 작성해주세요)'}
 
-위 설계를 바탕으로 개발 요청 문서를 작성해주세요.`;
+위 설계를 바탕으로 개발 요청 문서를 작성해주세요.
+- 파일별 구현 내용을 구체적으로 명시할 것
+- TypeScript 타입명·export 상수명을 PREFIX 규칙에 맞게 명시할 것
+- 완료 기준: \`npm run build\` 성공 → main 머지`;
 
   try {
     const job = await createJob({
