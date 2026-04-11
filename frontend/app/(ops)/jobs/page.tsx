@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { getJobs, retryJob } from '@/lib/api';
+import { getJobs, retryJob, skipJob } from '@/lib/api';
 import Card, { CardHeader, CardTitle, EmptyState } from '@/components/Card';
 import Button from '@/components/Button';
 import { JobStatusBadge, JOB_STATUS } from '@/components/StatusBadge';
 import PageHeader from '@/components/PageHeader';
 import { SkeletonRows } from '@/components/Skeleton';
 
-type JobStatus = 'queued' | 'running' | 'done' | 'failed';
+type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'skipped';
 
 const JOB_TYPE_LABEL: Record<string, string> = {
   plan:        '⚡ Plan 생성',
@@ -24,6 +24,7 @@ export default function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<JobStatus | 'all'>('all');
   const [retrying, setRetrying] = useState<string | null>(null);
+  const [skipping, setSkipping] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   const loadJobs = useCallback(async () => {
@@ -55,11 +56,21 @@ export default function JobsPage() {
     setRetrying(null);
   }
 
+  async function handleSkip(jobId: string) {
+    setSkipping(jobId);
+    try {
+      await skipJob(jobId);
+      await loadJobs();
+    } catch (e: any) { alert(e.message); }
+    setSkipping(null);
+  }
+
   const stats = {
     queued:  jobs.filter(j => j.status === 'queued').length,
     running: jobs.filter(j => j.status === 'running').length,
     done:    jobs.filter(j => j.status === 'done').length,
     failed:  jobs.filter(j => j.status === 'failed').length,
+    skipped: jobs.filter(j => j.status === 'skipped').length,
   };
 
   return (
@@ -69,7 +80,7 @@ export default function JobsPage() {
       <div style={{ flex: 1, overflow: 'auto', padding: '24px 28px 40px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* Stats row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
           {(Object.keys(stats) as JobStatus[]).map(s => {
             const m = JOB_STATUS[s];
             return (
@@ -89,7 +100,7 @@ export default function JobsPage() {
         {/* Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ display: 'flex', gap: 6 }}>
-            {(['all', 'queued', 'running', 'done', 'failed'] as const).map(f => (
+            {(['all', 'queued', 'running', 'done', 'failed', 'skipped'] as const).map(f => (
               <button key={f} onClick={() => setFilter(f)} style={{
                 padding: '5px 12px', borderRadius: 7, cursor: 'pointer', fontSize: 11,
                 background: filter === f ? 'rgba(200,169,110,0.12)' : 'rgba(255,255,255,0.02)',
@@ -145,13 +156,27 @@ export default function JobsPage() {
                 <div style={{ fontSize: 11, color: '#6a6880' }}>{JOB_TYPE_LABEL[job.job_type] || job.job_type || '—'}</div>
                 <div style={{ fontSize: 11, color: '#5a5870', fontFamily: 'monospace' }}>{job.model || '—'}</div>
                 <div style={{ fontSize: 11, color: '#3a3850' }}>{new Date(job.created_at).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  {job.status === 'failed' && (
-                    <button onClick={() => handleRetry(job.id)} disabled={retrying === job.id} style={{
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
+                  {job.status === 'failed' && <>
+                    <button onClick={() => handleRetry(job.id)} disabled={retrying === job.id || skipping === job.id} style={{
                       fontSize: 10, color: '#f87171', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)',
                       borderRadius: 6, padding: '3px 8px', cursor: 'pointer',
                     }}>
                       {retrying === job.id ? '...' : '↺ 재시도'}
+                    </button>
+                    <button onClick={() => handleSkip(job.id)} disabled={skipping === job.id || retrying === job.id} style={{
+                      fontSize: 10, color: '#5a5870', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: 6, padding: '3px 8px', cursor: 'pointer',
+                    }}>
+                      {skipping === job.id ? '...' : '✕ 스킵'}
+                    </button>
+                  </>}
+                  {job.status === 'queued' && (
+                    <button onClick={() => handleSkip(job.id)} disabled={skipping === job.id} style={{
+                      fontSize: 10, color: '#5a5870', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: 6, padding: '3px 8px', cursor: 'pointer',
+                    }}>
+                      {skipping === job.id ? '...' : '✕ 스킵'}
                     </button>
                   )}
                 </div>
@@ -160,7 +185,7 @@ export default function JobsPage() {
           </Card>
         )}
 
-        {/* Error details for failed jobs */}
+        {/* Error details for failed jobs (skipped 제외) */}
         {jobs.some(j => j.status === 'failed' && j.error_message) && (
           <Card>
             <CardHeader><CardTitle>실패한 작업 오류</CardTitle></CardHeader>

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  getContentStats, getContents, getJobs, getDeployments, getDocuments,
+  getContentStats, getContents, getJobs, getDeployments, getDocuments, autoGenerateIdeas,
 } from '@/lib/api';
 import PageHeader from '@/components/PageHeader';
 import Card, { CardHeader, CardTitle, LinkButton, EmptyState } from '@/components/Card';
@@ -23,6 +23,8 @@ export default function DashboardPage() {
   const [failedJobs, setFailedJobs] = useState<any[]>([]);
   const [recentDeploys, setRecentDeploys] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [autoResult, setAutoResult] = useState<any>(null);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -43,6 +45,19 @@ export default function DashboardPage() {
     setLoading(false);
   }
 
+  async function handleAutoGenerate() {
+    setGenerating(true);
+    setAutoResult(null);
+    try {
+      const res = await autoGenerateIdeas();
+      setAutoResult(res);
+      await loadAll(); // 통계 새로고침
+    } catch (e: any) {
+      alert(`생성 실패: ${e.message}`);
+    }
+    setGenerating(false);
+  }
+
   const totalActive = PIPELINE_ORDER.reduce((s, k) => s + (stats[k] || 0), 0);
   const pipelineTotal = Math.max(totalActive, 1);
 
@@ -53,13 +68,95 @@ export default function DashboardPage() {
         title="Dashboard"
         badge="Content Ops"
         actions={
-          <Button variant="primary" onClick={() => router.push('/contents/new')}>
-            + New Content
-          </Button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="secondary" onClick={handleAutoGenerate} disabled={generating}>
+              {generating ? (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 10, height: 10, border: '2px solid #9a98a8', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />
+                  아이디어 생성 중...
+                </span>
+              ) : '⚡ 오늘의 아이디어 생성'}
+            </Button>
+            <Button variant="primary" onClick={() => router.push('/contents/new')}>
+              + New Content
+            </Button>
+          </div>
         }
       />
 
       <main style={{ flex: 1, overflow: 'auto', padding: '24px 28px 40px' }}>
+
+        {/* 자동 생성 결과 */}
+        {generating && (
+          <div style={{ marginBottom: 20, padding: '20px 24px', borderRadius: 12, background: 'rgba(200,169,110,0.05)', border: '1px solid rgba(200,169,110,0.15)', display: 'flex', alignItems: 'center', gap: 14 }}>
+            <span style={{ width: 16, height: 16, border: '2px solid #c8a96e', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: 13, color: '#c8a96e', fontWeight: 500 }}>오늘의 아이디어를 생성하고 있습니다...</div>
+              <div style={{ fontSize: 11, color: '#5a5870', marginTop: 2 }}>기존 콘텐츠 중복 검사 → 아이디어 생성 → Ideas 자동 등록 순으로 진행됩니다 (약 20~30초)</div>
+            </div>
+          </div>
+        )}
+
+        {autoResult && !generating && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, color: '#5a5870', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: '#4ade80' }}>✓</span>
+              오늘의 카테고리: <span style={{ color: '#c8a96e', fontWeight: 500 }}>{autoResult.today_category}</span>
+              <span style={{ marginLeft: 'auto', cursor: 'pointer', color: '#3a3850' }} onClick={() => setAutoResult(null)}>✕</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {autoResult.items?.map((r: any) => (
+                <div key={r.item.id} style={{ padding: '18px 20px', borderRadius: 12, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)', cursor: 'pointer' }}
+                  onClick={() => router.push(`/contents/${r.item.id}/overview`)}>
+                  {/* 헤더 */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <span style={{ fontSize: 11, color: r.item.content_type === 'report' ? '#a78bfa' : '#60a5fa', background: r.item.content_type === 'report' ? 'rgba(167,139,250,0.1)' : 'rgba(96,165,250,0.1)', border: `1px solid ${r.item.content_type === 'report' ? 'rgba(167,139,250,0.25)' : 'rgba(96,165,250,0.25)'}`, borderRadius: 6, padding: '2px 8px' }}>
+                      {r.item.content_type === 'report' ? '📊 리포트' : '🧮 계산기'}
+                    </span>
+                    <span style={{ fontSize: 10, color: '#5a5870' }}>{r.item.category}</span>
+                  </div>
+                  {/* 제목 */}
+                  <div style={{ fontSize: 14, color: '#e2e0db', fontWeight: 600, marginBottom: 6, lineHeight: 1.4 }}>{r.item.title}</div>
+                  {/* 아이디어 요약 */}
+                  {r.idea?.result_summary && (
+                    <div style={{ fontSize: 11, color: '#6a6880', lineHeight: 1.5, marginBottom: 10, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {r.idea.result_summary}
+                    </div>
+                  )}
+                  {/* 점수 바 */}
+                  {r.scores && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: 10 }}>
+                      {[
+                        { key: 'search',        label: '검색성', color: '#60a5fa' },
+                        { key: 'revenue',       label: '수익화', color: '#4ade80' },
+                        { key: 'internal_link', label: '내부링크', color: '#a78bfa' },
+                        { key: 'difficulty',    label: '난이도', color: '#fbbf24' },
+                      ].map(({ key, label, color }) => (
+                        <div key={key} style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: 9, color: '#3a3850', marginBottom: 3 }}>{label}</div>
+                          <div style={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                            {[1,2,3,4,5].map(i => (
+                              <div key={i} style={{ width: 6, height: 6, borderRadius: 1, background: i <= (r.scores[key] || 0) ? color : 'rgba(255,255,255,0.06)' }} />
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* 제휴 힌트 */}
+                  {r.affiliate_hint && (
+                    <div style={{ fontSize: 10, color: '#c8a96e', background: 'rgba(200,169,110,0.06)', border: '1px solid rgba(200,169,110,0.12)', borderRadius: 6, padding: '4px 8px', marginBottom: 10 }}>
+                      💰 {r.affiliate_hint}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11, color: '#60a5fa', textAlign: 'right' }}>상세 보기 →</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <style dangerouslySetInnerHTML={{ __html: '@keyframes spin{to{transform:rotate(360deg)}}' }} />
 
         {/* KPI Cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12, marginBottom: 20 }}>
