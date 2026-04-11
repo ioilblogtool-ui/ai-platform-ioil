@@ -7,6 +7,7 @@ import PageHeader from '@/components/PageHeader';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import { ContentStatusBadge, CONTENT_STATUS } from '@/components/StatusBadge';
+import { SkeletonTableRows } from '@/components/Skeleton';
 
 type ContentStatus = 'idea' | 'planned' | 'designed' | 'ready_dev' | 'in_dev' | 'deployed' | 'archived';
 
@@ -173,7 +174,7 @@ function ContentsInner() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={10} style={{ padding: '40px', textAlign: 'center', color: '#3a3850', fontSize: 13 }}>Loading...</td></tr>
+                <SkeletonTableRows rows={8} cols={10} />
               ) : items.length === 0 ? (
                 <tr><td colSpan={10} style={{ padding: '48px', textAlign: 'center' }}>
                   <div style={{ fontSize: 24, opacity: 0.1, marginBottom: 10 }}>▤</div>

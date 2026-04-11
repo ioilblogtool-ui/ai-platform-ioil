@@ -7,6 +7,7 @@ import Card, { CardHeader, CardTitle, EmptyState } from '@/components/Card';
 import Button from '@/components/Button';
 import { DocStatusBadge } from '@/components/StatusBadge';
 import PageHeader from '@/components/PageHeader';
+import { SkeletonRows } from '@/components/Skeleton';
 
 type DocType = 'plan' | 'design' | 'dev_request';
 type DocStatus = 'draft' | 'reviewed' | 'approved';
@@ -129,7 +130,9 @@ export default function DocumentsPage() {
 
         {/* Documents list */}
         {loading ? (
-          <Card><EmptyState icon="≡" text="로딩 중..." /></Card>
+          <Card style={{ padding: 0, overflow: 'hidden' }}>
+            <SkeletonRows rows={8} cols={6} />
+          </Card>
         ) : filtered.length === 0 ? (
           <Card><EmptyState icon="≡" text="문서가 없습니다" /></Card>
         ) : (

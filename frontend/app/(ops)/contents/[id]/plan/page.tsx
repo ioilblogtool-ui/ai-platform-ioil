@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getContent, getDocuments, generatePlan, updateDocument, approveDocument, createDocument, getTemplates } from '@/lib/api';
+import { getContent, getDocuments, generatePlan, updateDocument, approveDocument, getJobs, getTemplates } from '@/lib/api';
 import Card, { CardHeader, CardTitle } from '@/components/Card';
 import Button from '@/components/Button';
 import { DocStatusBadge } from '@/components/StatusBadge';
 import MarkdownPreview from '@/components/MarkdownPreview';
+import { SkeletonEditor } from '@/components/Skeleton';
+import { useJobPoller } from '@/hooks/useJobPoller';
 
 export default function ContentPlanPage() {
   const params = useParams();
@@ -20,19 +22,54 @@ export default function ContentPlanPage() {
   const [approving, setApproving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [mode, setMode] = useState<'edit' | 'preview' | 'split'>('split');
+  const [initialLoading, setInitialLoading] = useState(true);
+
+  // 비동기 생성 job 추적
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+
+  // job 완료 시 문서 리로드
+  useJobPoller(activeJobId, {
+    onDone: async () => {
+      setGenerating(false);
+      setActiveJobId(null);
+      await loadDocuments();
+    },
+    onFailed: (msg) => {
+      setGenerating(false);
+      setActiveJobId(null);
+      alert(`생성 실패: ${msg}`);
+    },
+  });
 
   useEffect(() => { loadData(); }, [id]);
 
   async function loadData() {
     try {
-      const [c, docs] = await Promise.all([
-        getContent(id),
-        getDocuments({ content_item_id: id, doc_type: 'plan' }),
-      ]);
+      const [c] = await Promise.all([getContent(id)]);
       setContent(c);
+      await loadDocuments();
+    } catch {}
+    setInitialLoading(false);
+  }
+
+  async function loadDocuments() {
+    try {
+      // 문서 로드
+      const docs = await getDocuments({ content_item_id: id, doc_type: 'plan' });
       const existing = docs?.[0] || null;
       setDoc(existing);
       if (existing) setEditorContent(existing.content || '');
+
+      // 진행 중인 job이 있으면 자동으로 폴링 재개 (페이지 복귀 시 연결)
+      if (!existing || generating) {
+        const runningJobs = await getJobs({ content_item_id: id, status: 'running', limit: 1 });
+        const queuedJobs  = await getJobs({ content_item_id: id, status: 'queued',  limit: 1 });
+        const activeJob   = (runningJobs?.data?.[0]) || (queuedJobs?.data?.[0]);
+        if (activeJob && activeJob.job_type === 'plan_gen') {
+          setGenerating(true);
+          setActiveJobId(activeJob.id);
+        }
+      }
     } catch {}
   }
 
@@ -47,11 +84,12 @@ export default function ContentPlanPage() {
       } catch {}
 
       const res = await generatePlan({ content_item_id: id, template_content: templateContent });
-      setDoc(res.document);
-      setEditorContent(res.document.content || '');
-      setDirty(false);
-    } catch (e: any) { alert(e.message); }
-    setGenerating(false);
+      // 즉시 job_id 반환 → 폴링 시작
+      setActiveJobId(res.job_id);
+    } catch (e: any) {
+      alert(e.message);
+      setGenerating(false);
+    }
   }
 
   async function handleSave() {
@@ -67,12 +105,11 @@ export default function ContentPlanPage() {
 
   async function handleApprove() {
     if (!doc) return;
-    // 저장 먼저
     if (dirty) await handleSave();
     setApproving(true);
     try {
       await approveDocument(doc.id);
-      await loadData();
+      await loadDocuments();
     } catch (e: any) { alert(e.message); }
     setApproving(false);
   }
@@ -95,13 +132,17 @@ export default function ContentPlanPage() {
                 <DocStatusBadge value={doc.status} />
                 {dirty && <span style={{ fontSize: 10, color: '#fbbf24' }}>● 미저장</span>}
               </div>
+            ) : generating ? (
+              <span style={{ fontSize: 12, color: '#c8a96e', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#c8a96e', display: 'inline-block', animation: 'pulse 1.2s ease-in-out infinite' }} />
+                AI가 Plan을 생성 중입니다 — 다른 탭을 이용하셔도 됩니다
+              </span>
             ) : (
               <span style={{ fontSize: 12, color: '#3a3850' }}>Plan 문서가 없습니다</span>
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
-            {/* Mode toggle */}
-            {doc && (
+            {doc && !generating && (
               <div style={{ display: 'flex', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, overflow: 'hidden' }}>
                 {(['edit', 'split', 'preview'] as const).map(m => (
                   <button key={m} onClick={() => setMode(m)} style={{
@@ -123,7 +164,7 @@ export default function ContentPlanPage() {
                 </span>
               ) : doc ? '↺ Regenerate' : '⚡ Generate Plan'}
             </Button>
-            {doc && (
+            {doc && !generating && (
               <>
                 <Button variant="secondary" size="sm" onClick={handleSave} disabled={saving || !dirty}>
                   {saving ? '저장 중...' : '저장'}
@@ -142,14 +183,31 @@ export default function ContentPlanPage() {
         </div>
       </Card>
 
+      {/* 생성 중 배너 */}
+      {generating && (
+        <div style={{
+          padding: '12px 16px', borderRadius: 10,
+          background: 'rgba(200,169,110,0.06)', border: '1px solid rgba(200,169,110,0.2)',
+          display: 'flex', alignItems: 'center', gap: 12, fontSize: 12,
+        }}>
+          <span style={{ width: 12, height: 12, border: '2px solid #c8a96e', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+          <span style={{ color: '#c8a96e' }}>Plan 문서를 생성 중입니다...</span>
+          <span style={{ color: '#5a5870', marginLeft: 4 }}>다른 탭으로 이동해도 됩니다. 완료되면 자동으로 표시됩니다.</span>
+          <style dangerouslySetInnerHTML={{ __html: '@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}' }} />
+        </div>
+      )}
+
       {/* Editor / Preview */}
       <div style={{ flex: 1, display: 'flex', gap: 16, minHeight: 0 }}>
-        {mode !== 'preview' && (
+        {initialLoading || generating ? (
+          <div style={{ flex: 1, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, overflow: 'hidden' }}>
+            <SkeletonEditor />
+          </div>
+        ) : mode !== 'preview' && (
           <textarea
             value={editorContent}
             onChange={e => { setEditorContent(e.target.value); setDirty(true); }}
-            placeholder={generating ? '생성 중...' : '⚡ Generate Plan 버튼으로 AI 문서를 생성하거나\n직접 Markdown을 입력하세요.'}
-            disabled={generating}
+            placeholder='⚡ Generate Plan 버튼으로 AI 문서를 생성하거나&#10;직접 Markdown을 입력하세요.'
             style={{
               flex: 1, resize: 'none',
               background: 'rgba(255,255,255,0.02)',
@@ -162,7 +220,7 @@ export default function ContentPlanPage() {
           />
         )}
 
-        {(mode === 'preview' || mode === 'split') && editorContent && (
+        {!initialLoading && !generating && (mode === 'preview' || mode === 'split') && editorContent && (
           <div style={{
             flex: mode === 'preview' ? 1 : undefined,
             width: mode === 'split' ? '50%' : undefined,
@@ -185,4 +243,3 @@ export default function ContentPlanPage() {
     </div>
   );
 }
-

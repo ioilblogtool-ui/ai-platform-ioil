@@ -7,6 +7,7 @@ import Card, { EmptyState } from '@/components/Card';
 import Button from '@/components/Button';
 import { DeployStatusDot } from '@/components/StatusBadge';
 import PageHeader from '@/components/PageHeader';
+import { SkeletonRows } from '@/components/Skeleton';
 
 type Platform = 'cloudflare' | 'vercel' | 'railway' | 'other';
 type Environment = 'prod' | 'staging' | 'dev';
@@ -122,7 +123,9 @@ export default function DeploymentsPage() {
 
         {/* Table */}
         {loading ? (
-          <Card><EmptyState icon="↗" text="로딩 중..." /></Card>
+          <Card style={{ padding: 0, overflow: 'hidden' }}>
+            <SkeletonRows rows={7} cols={6} />
+          </Card>
         ) : deployments.length === 0 ? (
           <Card><EmptyState icon="↗" text="배포 이력이 없습니다" /></Card>
         ) : (

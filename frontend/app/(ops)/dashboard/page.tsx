@@ -9,6 +9,7 @@ import PageHeader from '@/components/PageHeader';
 import Card, { CardHeader, CardTitle, LinkButton, EmptyState } from '@/components/Card';
 import { ContentStatusBadge, DeployStatusDot, JobStatusBadge, CONTENT_STATUS } from '@/components/StatusBadge';
 import Button from '@/components/Button';
+import { SkeletonStat, SkeletonTableRows } from '@/components/Skeleton';
 
 type ContentStatus = 'idea' | 'planned' | 'designed' | 'ready_dev' | 'in_dev' | 'deployed';
 
@@ -47,6 +48,7 @@ export default function DashboardPage() {
 
   return (
     <>
+      <style dangerouslySetInnerHTML={{ __html: `@keyframes skeleton-shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}.skeleton-shimmer{background:linear-gradient(90deg,rgba(255,255,255,.04) 25%,rgba(255,255,255,.09) 50%,rgba(255,255,255,.04) 75%);background-size:200% 100%;animation:skeleton-shimmer 1.6s ease-in-out infinite}` }} />
       <PageHeader
         title="Dashboard"
         badge="Content Ops"
@@ -71,27 +73,31 @@ export default function DashboardPage() {
                 onClick={() => router.push(`/contents?status=${status}`)}
                 style={{ padding: '16px 16px 14px', position: 'relative', overflow: 'hidden' }}
               >
-                {/* bg glow */}
                 <div style={{ position: 'absolute', top: -20, right: -20, width: 60, height: 60, borderRadius: '50%', background: `${meta.color}25`, filter: 'blur(20px)', pointerEvents: 'none' }} />
                 <div style={{ fontSize: 10, color: '#5a5870', marginBottom: 8, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                   {meta.label}
                 </div>
-                <div style={{
-                  fontSize: 30, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1,
-                  background: `linear-gradient(135deg, ${meta.color}, ${meta.color}80)`,
-                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-                }}>
-                  {String(count).padStart(2, '0')}
-                </div>
-                {/* step dots */}
-                <div style={{ display: 'flex', gap: 3, marginTop: 8 }}>
-                  {PIPELINE_ORDER.map((_, j) => (
-                    <div key={j} style={{
-                      height: 2, borderRadius: 1, flex: j === i ? 2 : 1,
-                      background: j === i ? meta.color : j < i ? `${meta.color}40` : 'rgba(255,255,255,0.05)',
-                    }} />
-                  ))}
-                </div>
+                {loading ? (
+                  <SkeletonStat />
+                ) : (
+                  <>
+                    <div style={{
+                      fontSize: 30, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1,
+                      background: `linear-gradient(135deg, ${meta.color}, ${meta.color}80)`,
+                      WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                    }}>
+                      {String(count).padStart(2, '0')}
+                    </div>
+                    <div style={{ display: 'flex', gap: 3, marginTop: 8 }}>
+                      {PIPELINE_ORDER.map((_, j) => (
+                        <div key={j} style={{
+                          height: 2, borderRadius: 1, flex: j === i ? 2 : 1,
+                          background: j === i ? meta.color : j < i ? `${meta.color}40` : 'rgba(255,255,255,0.05)',
+                        }} />
+                      ))}
+                    </div>
+                  </>
+                )}
               </Card>
             );
           })}
@@ -164,7 +170,13 @@ export default function DashboardPage() {
               <CardTitle>Recent Documents</CardTitle>
               <LinkButton onClick={() => router.push('/documents')}>View all →</LinkButton>
             </CardHeader>
-            {recentDocs.length === 0 ? <EmptyState icon="≡" text="문서가 없습니다" /> : (
+            {loading ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 0' }}>
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="skeleton-shimmer" style={{ height: 32, borderRadius: 7, opacity: 1 - i * 0.15 }} />
+                ))}
+              </div>
+            ) : recentDocs.length === 0 ? <EmptyState icon="≡" text="문서가 없습니다" /> : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {recentDocs.map(doc => {
                   const DT: Record<string, { color: string; label: string }> = {
@@ -238,7 +250,11 @@ export default function DashboardPage() {
             <CardTitle>Recent Contents</CardTitle>
             <LinkButton onClick={() => router.push('/contents')}>View all →</LinkButton>
           </CardHeader>
-          {recentContents.length === 0 ? <EmptyState icon="▤" text="콘텐츠를 추가해보세요" /> : (
+          {loading ? (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <tbody><SkeletonTableRows rows={5} cols={5} /></tbody>
+              </table>
+            ) : recentContents.length === 0 ? <EmptyState icon="▤" text="콘텐츠를 추가해보세요" /> : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>

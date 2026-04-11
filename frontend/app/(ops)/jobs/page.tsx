@@ -7,6 +7,7 @@ import Card, { CardHeader, CardTitle, EmptyState } from '@/components/Card';
 import Button from '@/components/Button';
 import { JobStatusBadge, JOB_STATUS } from '@/components/StatusBadge';
 import PageHeader from '@/components/PageHeader';
+import { SkeletonRows } from '@/components/Skeleton';
 
 type JobStatus = 'queued' | 'running' | 'done' | 'failed';
 
@@ -112,7 +113,9 @@ export default function JobsPage() {
 
         {/* Jobs Table */}
         {loading ? (
-          <Card><EmptyState icon="◎" text="로딩 중..." /></Card>
+          <Card style={{ padding: 0, overflow: 'hidden' }}>
+            <SkeletonRows rows={8} cols={6} />
+          </Card>
         ) : jobs.length === 0 ? (
           <Card><EmptyState icon="◎" text="작업이 없습니다" /></Card>
         ) : (
