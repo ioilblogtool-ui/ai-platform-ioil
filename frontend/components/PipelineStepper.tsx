@@ -54,8 +54,16 @@ export default function PipelineStepper({ current, size = 'md' }: PipelineSteppe
   );
 }
 
-// 라벨 포함 버전
-export function PipelineStepperFull({ current }: { current: ContentStatus }) {
+// 라벨 포함 버전 (클릭 시 상태 전환)
+export function PipelineStepperFull({
+  current,
+  onTransition,
+  transitioning,
+}: {
+  current: ContentStatus;
+  onTransition?: (status: ContentStatus) => void;
+  transitioning?: boolean;
+}) {
   const currentIdx = STEPS.indexOf(current);
 
   return (
@@ -64,23 +72,33 @@ export function PipelineStepperFull({ current }: { current: ContentStatus }) {
         const meta = CONTENT_STATUS[step];
         const isDone = i < currentIdx;
         const isActive = i === currentIdx;
+        const isClickable = !isActive && !transitioning && !!onTransition;
 
         return (
           <div key={step} style={{ display: 'flex', alignItems: 'flex-start', flex: i < STEPS.length - 1 ? 1 : 'none' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <div
+              onClick={() => isClickable && onTransition?.(step)}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                cursor: isClickable ? 'pointer' : 'default',
+                opacity: transitioning ? 0.5 : 1,
+              }}
+            >
               {/* Dot */}
               <div style={{
                 width: 12, height: 12, borderRadius: '50%', flexShrink: 0,
                 background: isActive ? meta.color : isDone ? '#4ade8040' : '#1e1e24',
                 border: isActive ? `2px solid ${meta.color}` : isDone ? '2px solid #4ade8060' : '2px solid #2a2a30',
-                boxShadow: isActive ? `0 0 10px ${meta.color}80` : 'none',
+                boxShadow: isActive ? `0 0 10px ${meta.color}80` : isClickable ? `0 0 0 3px ${meta.color}15` : 'none',
                 position: 'relative',
+                transition: 'all 0.15s',
               }} />
               {/* Label */}
               <span style={{
                 fontSize: 10, whiteSpace: 'nowrap',
-                color: isActive ? meta.color : isDone ? '#3a3850' : '#2a2a30',
+                color: isActive ? meta.color : isDone ? '#5a5870' : isClickable ? '#3a3850' : '#2a2a30',
                 fontWeight: isActive ? 500 : 400,
+                transition: 'color 0.15s',
               }}>
                 {meta.label}
               </span>

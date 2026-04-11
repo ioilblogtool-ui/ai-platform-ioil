@@ -26,6 +26,7 @@ export default function ContentDetailLayout({ children }: { children: React.Reac
 
   const [content, setContent] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [transitioning, setTransitioning] = useState(false);
 
   useEffect(() => {
     if (id) loadContent();
@@ -37,6 +38,17 @@ export default function ContentDetailLayout({ children }: { children: React.Reac
       setContent(data);
     } catch {}
     setLoading(false);
+  }
+
+  async function handleTransition(status: string) {
+    setTransitioning(true);
+    try {
+      await transitionContent(id, status as any);
+      await loadContent();
+    } catch (e: any) {
+      alert(e.message);
+    }
+    setTransitioning(false);
   }
 
   const activeTab = TABS.find(t => pathname.endsWith(t.href))?.href || 'overview';
@@ -73,7 +85,17 @@ export default function ContentDetailLayout({ children }: { children: React.Reac
           </div>
 
           {/* Header Actions */}
-          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
+            {content?.status === 'deployed' && (
+              <Button variant="ghost" size="sm" onClick={() => handleTransition('archived')} disabled={transitioning}>
+                🗄 Archive
+              </Button>
+            )}
+            {content?.status === 'archived' && (
+              <Button variant="ghost" size="sm" onClick={() => handleTransition('idea')} disabled={transitioning}>
+                ↩ Restore
+              </Button>
+            )}
             <Button variant="secondary" size="sm" onClick={() => router.push(`/contents/${id}/plan`)}>
               ⚡ Generate Plan
             </Button>
@@ -84,7 +106,11 @@ export default function ContentDetailLayout({ children }: { children: React.Reac
         {/* Pipeline Stepper */}
         {content && (
           <div style={{ padding: '12px 28px 0' }}>
-            <PipelineStepperFull current={content.status} />
+            <PipelineStepperFull
+              current={content.status}
+              onTransition={handleTransition}
+              transitioning={transitioning}
+            />
           </div>
         )}
 

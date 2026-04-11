@@ -1,7 +1,7 @@
 # AI Platform — Dashboard 운영 가이드
 
 > 대상: 플랫폼 운영자 (1인 기업 대표)  
-> 최종 수정: 2026-04-10
+> 최종 수정: 2026-04-11
 
 ---
 
@@ -40,19 +40,20 @@
 ## 2. 화면 구성
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Dashboard                          Content Ops  [+ New Content] │  ← PageHeader
-├──────────┬──────────┬──────────┬──────────┬──────────┬──────────┤
-│  Idea    │ Planned  │ Designed │ ReadyDev │  In Dev  │ Deployed │  ← KPI Cards
-├──────────────────────────────────┬──────────────────────────────┤
-│  Content Pipeline (바 차트)       │  Quick Actions               │  ← Row 2
-├─────────────────────────┬────────┴──────────────────────────────┤
-│  Recent Documents        │  Failed Jobs                         │  ← Row 3
-├──────────────────────────┴───────────────────────────────────────┤
-│  Recent Contents (테이블)                                         │  ← Row 4
-├──────────────────────────────────────────────────────────────────┤
-│  Recent Deployments                                               │  ← Row 5
-└──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Dashboard          [⚡ 오늘의 아이디어 생성]  [+ New Content]            │  ← PageHeader
+├──────────┬──────────┬──────────┬──────────┬──────────┬──────────────────┤
+│  Idea    │ Planned  │ Designed │ ReadyDev │  In Dev  │ Deployed         │  ← KPI Cards
+├──────────────────────────────────┬──────────────────────────────────────┤
+│  Content Pipeline (바 차트)       │  Quick Actions                       │  ← Row 2
+├─────────────────────────┬────────┴──────────────────────────────────────┤
+│  Recent Documents        │  Failed Jobs                                  │  ← Row 3
+├──────────────────────────┴────────────────────────────────────────────── │
+│  Recent Contents (테이블)                                                 │  ← Row 4
+├───────────────────────────────────────────────────────────────────────── │
+│  Recent Deployments                                                       │  ← Row 5
+│  [자동 아이디어 생성 결과 카드 — 버튼 클릭 시 표시]                          │  ← Row 6 (동적)
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -102,7 +103,21 @@
 
 ---
 
-### 2-4. Recent Documents
+### 2-4. ⚡ 오늘의 아이디어 생성 버튼
+
+PageHeader 우측의 버튼을 클릭하면 Claude가 **계산기 1개 + 리포트 1개**를 자동으로 생성한다.
+
+- 기존 콘텐츠와 중복되지 않는 주제 선택
+- 카테고리 로테이션: 최근 10개에 없는 우선 카테고리 자동 선택
+- 생성 결과가 DB에 저장되고 화면에 결과 카드가 표시됨
+- 각 결과 카드에서 **상세 보기 →** 클릭 시 해당 콘텐츠의 Overview 탭 이동
+
+> **자동 스케줄**: 매일 오전 09:00 KST에 백엔드에서 자동 실행 (Railway 배포 시)  
+> `SCHEDULER_USER_ID` 환경변수 설정 필요
+
+---
+
+### 2-5. Recent Documents
 
 최근 생성/수정된 문서 4개를 표시한다.
 
@@ -116,7 +131,7 @@
 
 ---
 
-### 2-5. Failed Jobs
+### 2-6. Failed Jobs
 
 **AI 생성에 실패한 작업**만 표시한다. 정상이면 빈 상태(`실패한 Job이 없습니다`)여야 한다.
 
@@ -132,7 +147,7 @@
 
 ---
 
-### 2-6. Recent Contents
+### 2-7. Recent Contents
 
 최근 수정된 콘텐츠 5개를 테이블로 표시한다.
 
@@ -148,7 +163,7 @@
 
 ---
 
-### 2-7. Recent Deployments
+### 2-8. Recent Deployments
 
 최근 배포 이력 4건을 표시한다.
 
@@ -168,7 +183,8 @@
 
 ```
 [1] 아이디어 등록
-      ↓  /contents/new (wizard)
+      ↓  /contents/new (wizard) — 유사 콘텐츠 자동 체크 (51%+ 경고, 76%+ 차단)
+      또는 ⚡ 오늘의 아이디어 생성 버튼으로 자동 등록
 [2] Idea 상태
       ↓  Ideas 탭 → AI 아이디어 브레인스토밍 (선택)
       ↓  Plan 탭 → ⚡ Generate Plan → Approve
@@ -176,26 +192,40 @@
       ↓  Design 탭 → ⚡ Generate Design → Approve
 [4] Designed 상태
       ↓  Dev Request 탭 → ⚡ Generate Dev Request → 복사 → AI 개발 도구에 전달
-      ↓  상태를 수동으로 Ready Dev 전환
+      ↓  파이프라인 스텝 클릭으로 Ready Dev 전환
 [5] Ready Dev 상태
       ↓  Git 탭 → 브랜치/PR 정보 등록
-      ↓  상태를 수동으로 In Dev 전환
+      ↓  파이프라인 스텝 클릭으로 In Dev 전환
 [6] In Dev 상태
       ↓  개발 완료 → Deploy 탭 → 배포 등록
-      ↓  상태를 수동으로 Deployed 전환
+      ↓  파이프라인 스텝 클릭으로 Deployed 전환
 [7] Deployed 상태 ✅
-      ↓  (필요 시) 수동으로 Archived 전환
+      ↓  헤더 [🗄 Archive] 버튼으로 아카이브
 [8] Archived 상태
+      ↓  헤더 [↩ Restore] 버튼으로 Idea 복원
 ```
 
-### 상태 자동 전환 규칙
+### 상태 전환 방법
 
-| 트리거 | 자동 전환 |
-|--------|----------|
-| Plan 문서 **Approve** 클릭 | `idea` → `planned` |
-| Design 문서 **Approve** 클릭 | `planned` → `designed` |
+| 방법 | 위치 | 설명 |
+|------|------|------|
+| **파이프라인 스텝 클릭** | 모든 탭 상단 | 원하는 단계 클릭 → 즉시 전환 |
+| **자동 전환** | Plan/Design Approve | Plan 승인 → `planned`, Design 승인 → `designed` |
+| **헤더 버튼** | Deployed/Archived 상태 | Archive / Restore 버튼 |
 
-> 그 외 상태 전환은 Overview 탭의 **상태 변경** 카드에서 수동으로 진행.
+> 이전에는 Overview 탭 "상태 변경" 카드에서만 가능했으나, 이제 상단 파이프라인 스텝을 직접 클릭해서 전환 가능.
+
+---
+
+### 콘텐츠 유사도 체크
+
+새 콘텐츠 등록 시 제목·키워드 기반으로 기존 콘텐츠와 자동 비교:
+
+| 유사도 | 결과 |
+|--------|------|
+| 0~50% | 통과 |
+| 51~75% | 경고 배너 표시 ("그래도 계속" 선택 가능) |
+| 76%+ | 등록 차단 (제목 수정 필요) |
 
 ---
 
@@ -209,27 +239,33 @@
 
 2. **Failed Jobs 패널 확인**
    - 실패 항목이 있으면 즉시 Retry 또는 `/jobs`에서 오류 원인 파악
+   - 오래된 실패 작업은 [스킵] 처리로 정리
 
-3. **Recent Documents 확인**
+3. **자동 생성 아이디어 확인** (스케줄러 설정 시)
+   - 매일 09:00 KST에 계산기 1개 + 리포트 1개 자동 등록
+   - Contents → Idea 상태 콘텐츠에서 확인 → Overview AI 분석 카드 검토
+
+4. **Recent Documents 확인**
    - Draft 상태 문서가 오래 방치되지 않았는지 점검
 
 ### 콘텐츠 작업 루틴
 
 ```
-1. /contents/new → 새 콘텐츠 등록
+1. /contents/new → 새 콘텐츠 등록 (유사도 체크 자동 실행)
 2. /contents/[id]/ideas → 아이디어 브레인스토밍 (선택)
-3. /contents/[id]/plan → Plan 생성 → 검토 → Approve
-4. /contents/[id]/design → Design 생성 → 검토 → Approve
+3. /contents/[id]/plan → Plan 생성 → 검토 → Approve (자동으로 Planned 전환)
+4. /contents/[id]/design → Design 생성 → 검토 → Approve (자동으로 Designed 전환)
 5. /contents/[id]/dev-request → Dev Request 생성 → Claude Code에 복사
-6. 개발 완료 후 /contents/[id]/git → 브랜치/PR 등록
-7. 배포 후 /contents/[id]/deploy → 배포 URL 등록
-8. Overview → 상태를 Deployed로 변경
+6. 파이프라인 스텝 클릭 → Ready Dev → In Dev 전환
+7. 개발 완료 후 /contents/[id]/git → 브랜치/PR 등록
+8. 배포 후 /contents/[id]/deploy → 배포 URL 등록
+9. 파이프라인 스텝 클릭 → Deployed 전환
 ```
 
 ### 주간 정리 (10분)
 
 - `/documents` → Draft 상태 문서 검토/삭제
-- `/jobs` → 실패 작업 정리
+- `/jobs` → 실패/스킵 작업 정리
 - `/deployments` → Pending 상태 배포 → 성공 처리 또는 삭제
 
 ---
@@ -246,6 +282,7 @@
    - Category: 부동산
    - SEO Keyword: 부동산 양도세
    - Target Repo: my-tools
+   → 유사도 체크 자동 실행 (경고 시 확인 후 진행)
 ③ Contents List에서 방금 생성된 콘텐츠 클릭
 ④ Ideas 탭 → [⚡ Generate Ideas] → 원하는 아이디어 메모
 ⑤ Plan 탭 → [⚡ Generate Plan] → 내용 검토 → [Approve →]
@@ -254,10 +291,10 @@
    (자동으로 Designed 상태 전환)
 ⑦ Dev Request 탭 → Target Model: Claude Code → [⚡ Generate Dev Request]
    → [⎘ Copy] → Claude Code에 붙여넣기
-⑧ Overview → 상태 변경 → Ready Dev
-⑨ Git 탭 → 브랜치명/PR URL 등록 → 상태 변경 → In Dev
-⑩ 배포 후 Deploy 탭 → 플랫폼/URL 등록 → [✓ 성공]
-⑪ Overview → 상태 변경 → Deployed
+⑧ 파이프라인 스텝 [Ready Dev] 클릭
+⑨ Git 탭 → 브랜치명/PR URL 등록 → 파이프라인 스텝 [In Dev] 클릭
+⑩ 배포 후 Deploy 탭 → 플랫폼/URL 등록
+⑪ 파이프라인 스텝 [Deployed] 클릭 ✅
 ```
 
 ---
@@ -277,6 +314,7 @@
    - "authentication_error" → backend .env의 ANTHROPIC_API_KEY 확인
 
 ③ 원인 해결 후 [↺ 재시도] 클릭
+④ 해결 불가 시 [스킵] 클릭 → 작업 목록에서 제거
 ```
 
 ---
@@ -287,12 +325,12 @@
 
 ```
 ① /contents → 해당 콘텐츠 클릭
-② Overview → 상태 변경 → In Dev (뒤로 전환)
+② 파이프라인 스텝에서 [In Dev] 클릭 (뒤로 전환)
 ③ Design 또는 Dev Request 탭 → [↺ Regenerate] → 수정
 ④ Dev Request → 복사 → 수정 작업 진행
 ⑤ Git 탭 → 새 브랜치/PR 정보 추가
 ⑥ Deploy 탭 → 새 배포 등록
-⑦ Overview → 상태 변경 → Deployed
+⑦ 파이프라인 스텝 [Deployed] 클릭 ✅
 ```
 
 ---
@@ -303,7 +341,7 @@ Plan/Design/Dev Request 결과가 마음에 들지 않을 때:
 
 ```
 ① /templates → 해당 Doc Type 템플릿 선택 → 수정
-   - Plan 탭은 기본 템플릿을 자동으로 사용
+   - Plan/Design 탭은 is_default 템플릿을 자동으로 사용
    - is_default 체크된 템플릿이 우선 사용됨
 
 ② /prompt-library → 관련 프롬프트 수정
@@ -315,19 +353,35 @@ Plan/Design/Dev Request 결과가 마음에 들지 않을 때:
 
 ---
 
-### 시나리오 E: 활동 이력 확인
+### 시나리오 E: 자동 아이디어 검토 및 파이프라인 투입
+
+매일 자동 생성된 아이디어를 검토하고 개발 파이프라인에 올릴 때:
+
+```
+① 대시보드 → Idea KPI 카드 클릭 (또는 /contents?status=idea)
+② 오늘 자동 생성된 콘텐츠 클릭 (제목에 자동생성 표시)
+③ Overview 탭 → AI 분석 카드 확인
+   - 스코어 도트: 검색량 / 수익성 / 내부링크 / 난이도
+   - 제휴 힌트: 연결 가능한 제휴 상품
+   - 확장 시리즈: 후속 콘텐츠 아이디어
+④ 진행 가치 있으면 → Plan 탭 → [⚡ Generate Plan]
+⑤ 가치 없으면 → 헤더 [🗄 Archive] 클릭
+```
+
+---
+
+### 시나리오 F: 활동 이력 확인
 
 콘텐츠가 언제 어떻게 변경됐는지 추적하고 싶을 때:
 
 ```
 ① /contents/[id]/activity 탭 이동
 ② 타임라인에서 확인 가능한 이벤트:
-   - 생성 (created)
-   - 상태 변경 (status_changed): "idea → planned"
-   - AI 문서 생성 (plan_generated 등)
-   - 문서 승인 (document_approved)
-   - Git 연결 (git_linked)
-   - 배포 (deployed)
+   - content_created: 콘텐츠 생성
+   - status_changed: 상태 변경 (idea → planned 등)
+   - document_generated: AI 문서 생성 (plan/design/dev_request)
+   - idea_generated: 아이디어 생성
+   - job_failed: AI 생성 실패
 ```
 
 ---
@@ -355,17 +409,32 @@ Plan/Design/Dev Request 결과가 마음에 들지 않을 때:
 
 ---
 
-### Q. Approve 버튼을 눌렀는데 상태가 안 바뀐다
+### Q. Jobs 목록에 실패 작업이 쌓여있다
 
-- 콘텐츠 Overview 탭 → 상태 변경 카드 → 수동으로 다음 상태 클릭
-- 백엔드 `/api/documents/:id/approve` 엔드포인트 응답 확인
+- [↺ 재시도] 클릭 → 성공 시 해결
+- 반복 실패 시 [스킵] 클릭 → `skipped` 상태로 처리
+- `skipped` 상태가 DB에 없으면 Supabase SQL 실행 필요:
+  ```sql
+  ALTER TABLE generation_jobs DROP CONSTRAINT generation_jobs_status_check;
+  ALTER TABLE generation_jobs ADD CONSTRAINT generation_jobs_status_check
+    CHECK (status IN ('queued','running','done','failed','skipped'));
+  ```
 
 ---
 
-### Q. 사이드바의 Prompts를 클릭해도 이동하지 않는다
+### Q. 파이프라인 스텝 클릭이 안 된다
 
-- 사이드바의 href는 `/prompt-library` → 주소창에서 직접 `/prompt-library` 입력
-- 또는 `/settings`에서 관련 설정 확인
+- 현재 단계(active) 스텝은 클릭 불가 (의도된 동작)
+- `deployed` → `archived` 전환은 파이프라인 스텝이 아닌 헤더 **[🗄 Archive]** 버튼 사용
+- 전환 중(transitioning) 상태에서는 클릭 비활성 → 잠시 기다린 후 재시도
+
+---
+
+### Q. 자동 아이디어 생성 스케줄러가 작동하지 않는다
+
+- Railway Variables에 `SCHEDULER_USER_ID` 설정 여부 확인
+- 값은 Supabase → Authentication → Users → 본인 계정 UUID
+- 백엔드 로그에 `[Scheduler] 매일 09:00 KST 자동 아이디어 생성 스케줄 등록됨` 확인
 
 ---
 
@@ -380,26 +449,26 @@ Plan/Design/Dev Request 결과가 마음에 들지 않을 때:
 ## 7. 네비게이션 맵
 
 ```
-/dashboard              ← 여기서 시작
+/dashboard              ← 여기서 시작 + ⚡ 오늘의 아이디어 생성
 │
 ├── /contents           ← 콘텐츠 목록 (상태 필터 가능)
-│   ├── /contents/new   ← 새 콘텐츠 wizard
+│   ├── /contents/new   ← 새 콘텐츠 wizard (유사도 체크 포함)
 │   └── /contents/[id]
-│       ├── /overview   ← 기본 정보 + Next Actions + 상태 변경
+│       ├── /overview   ← 기본 정보 + AI 분석 카드 + Next Actions
 │       ├── /ideas      ← AI 아이디어 생성
 │       ├── /plan       ← Plan 문서 생성/편집/승인
-│       ├── /design     ← Design 문서 생성/편집/승인
+│       ├── /design     ← Design 문서 생성/편집/승인 (템플릿 자동 적용)
 │       ├── /dev-request← Dev Request 생성/복사
 │       ├── /git        ← 브랜치/PR 등록
 │       ├── /deploy     ← 배포 등록/추적
 │       └── /activity   ← 변경 이력 타임라인
 │
-├── /jobs               ← AI 생성 작업 전체 이력 + retry
+├── /jobs               ← AI 생성 작업 전체 이력 + retry + skip
 ├── /documents          ← 문서 전체 목록 + 필터
 ├── /deployments        ← 배포 전체 이력
 │
 ├── /prompt-library     ← 재사용 프롬프트 관리
-├── /templates          ← 문서 템플릿 관리
+├── /templates          ← 문서 템플릿 관리 (Plan/Design/Dev Request)
 └── /settings           ← 프로필 / 모델 / 시스템 프롬프트 / 위험구역
 ```
 
@@ -418,3 +487,5 @@ Plan/Design/Dev Request 결과가 마음에 들지 않을 때:
 | Archived | `#6b7280` | 비활성 |
 | Error/Failed | `#f87171` | Failed Jobs, 배포 실패 |
 | 골드 (액션) | `#c8a96e` | 버튼, 활성 네비, 링크 |
+| 제휴 힌트 | `#c8a96e` | AI 분석 카드 pill |
+| 확장 시리즈 | `#a78bfa` | AI 분석 카드 pill |
