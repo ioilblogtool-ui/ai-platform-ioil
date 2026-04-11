@@ -6,10 +6,11 @@ import Card, { CardHeader, CardTitle, Divider } from '@/components/Card';
 import Button from '@/components/Button';
 import PageHeader from '@/components/PageHeader';
 
-type Section = 'profile' | 'api' | 'system' | 'danger';
+type Section = 'profile' | 'project' | 'api' | 'system' | 'danger';
 
 const SECTIONS: { key: Section; label: string; icon: string }[] = [
   { key: 'profile', label: '프로필',         icon: '◉' },
+  { key: 'project', label: '프로젝트',       icon: '◧' },
   { key: 'api',     label: 'API 설정',        icon: '◈' },
   { key: 'system',  label: '시스템 프롬프트', icon: '≡' },
   { key: 'danger',  label: '위험 구역',       icon: '⚠' },
@@ -151,6 +152,79 @@ export default function SettingsPage() {
                 <Button variant="primary" size="md" onClick={handleSave} disabled={saving}>
                   {saved ? '✓ 저장됨' : saving ? '저장 중...' : '저장'}
                 </Button>
+              </div>
+            </div>
+          )}
+
+          {section === 'project' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div>
+                <h2 style={{ fontSize: 16, fontWeight: 600, color: '#e2e0db', marginBottom: 4 }}>프로젝트 설정</h2>
+                <p style={{ fontSize: 12, color: '#5a5870' }}>AI 생성 프롬프트에 자동으로 주입되는 프로젝트 컨텍스트입니다.</p>
+              </div>
+
+              <Card>
+                <CardHeader><CardTitle>스택 정보</CardTitle></CardHeader>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {[
+                    { label: '사이트',      value: 'https://bigyocalc.com' },
+                    { label: '레포',        value: 'https://github.com/ioilblogtool-ui/blog-tool' },
+                    { label: '프레임워크',  value: 'Astro SSG' },
+                    { label: '배포 플랫폼', value: 'Cloudflare Pages' },
+                    { label: '배포 방식',   value: 'main 브랜치 푸시 → 즉시 라이브' },
+                  ].map(({ label, value }) => (
+                    <div key={label} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                      <span style={{ fontSize: 11, color: '#5a5870', width: 80, flexShrink: 0, paddingTop: 1 }}>{label}</span>
+                      <span style={{ fontSize: 12, color: '#c8c6c0', wordBreak: 'break-all' }}>{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              <Card>
+                <CardHeader><CardTitle>계산기 파일 구조</CardTitle></CardHeader>
+                <p style={{ fontSize: 11, color: '#5a5870', marginBottom: 12 }}>신규 계산기 추가 시 4개 파일이 필요합니다.</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {[
+                    { path: 'src/pages/tools/{slug}/index.astro', desc: '페이지 템플릿' },
+                    { path: 'src/data/tools.ts',                  desc: '메타데이터 레지스트리 (항목 추가)' },
+                    { path: 'src/scripts/{slug}.js',              desc: '클라이언트 계산 로직' },
+                    { path: 'src/styles/{slug}.scss',             desc: '페이지 전용 스타일' },
+                  ].map(({ path, desc }) => (
+                    <div key={path} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                      <code style={{ fontSize: 11, color: '#c8a96e', fontFamily: '"SF Mono", "Fira Code", monospace', flex: 1 }}>{path}</code>
+                      <span style={{ fontSize: 11, color: '#5a5870', flexShrink: 0 }}>{desc}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 11, color: '#5a5870', marginBottom: 8 }}>레이아웃 쉘 3종</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {['SimpleToolShell', 'CompareToolShell', 'TimelineToolShell'].map(s => (
+                      <span key={s} style={{ fontSize: 11, color: '#8b8a9e', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 6, padding: '4px 10px' }}>{s}</span>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+
+              <Card>
+                <CardHeader><CardTitle>리포트 파일 구조</CardTitle></CardHeader>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {[
+                    { path: 'src/pages/reports/{slug}/index.astro', desc: '리포트 페이지' },
+                    { path: 'src/data/reports.ts',                  desc: '메타데이터 레지스트리 (항목 추가)' },
+                  ].map(({ path, desc }) => (
+                    <div key={path} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                      <code style={{ fontSize: 11, color: '#c8a96e', fontFamily: '"SF Mono", "Fira Code", monospace', flex: 1 }}>{path}</code>
+                      <span style={{ fontSize: 11, color: '#5a5870', flexShrink: 0 }}>{desc}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              <div style={{ padding: '14px 16px', borderRadius: 10, background: 'rgba(200,169,110,0.05)', border: '1px solid rgba(200,169,110,0.15)', fontSize: 12, color: '#8b8a9e', lineHeight: 1.6 }}>
+                위 정보는 Plan / Design / Dev Request 문서를 AI로 생성할 때 자동으로 프롬프트에 포함됩니다.
+                프로젝트 구조가 변경되면 백엔드 <code style={{ color: '#c8a96e', fontSize: 11 }}>routes/generate.js</code>의 <code style={{ color: '#c8a96e', fontSize: 11 }}>PROJECT_CONTEXT</code>를 수정하세요.
               </div>
             </div>
           )}

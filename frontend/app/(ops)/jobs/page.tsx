@@ -28,8 +28,8 @@ export default function JobsPage() {
   const loadJobs = useCallback(async () => {
     try {
       const params = filter !== 'all' ? { status: filter as JobStatus, limit: 50 } : { limit: 50 };
-      const data = await getJobs(params);
-      setJobs(Array.isArray(data) ? data : []);
+      const res = await getJobs(params);
+      setJobs(Array.isArray(res) ? res : (res?.data ?? []));
     } catch {}
     setLoading(false);
   }, [filter]);

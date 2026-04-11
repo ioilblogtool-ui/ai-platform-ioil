@@ -6,6 +6,7 @@ import { getDocuments, generateDesign, updateDocument, approveDocument } from '@
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import { DocStatusBadge } from '@/components/StatusBadge';
+import MarkdownPreview from '@/components/MarkdownPreview';
 
 export default function ContentDesignPage() {
   const params = useParams();
@@ -13,6 +14,7 @@ export default function ContentDesignPage() {
 
   const [doc, setDoc] = useState<any>(null);
   const [planDoc, setPlanDoc] = useState<any>(null);
+  const [mode, setMode] = useState<'edit' | 'preview' | 'split'>('split');
   const [editorContent, setEditorContent] = useState('');
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -92,7 +94,21 @@ export default function ContentDesignPage() {
               <span style={{ fontSize: 12, color: '#3a3850' }}>Design 문서가 없습니다</span>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {doc && (
+              <div style={{ display: 'flex', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, overflow: 'hidden' }}>
+                {(['edit', 'split', 'preview'] as const).map(m => (
+                  <button key={m} onClick={() => setMode(m)} style={{
+                    padding: '4px 10px', fontSize: 11, border: 'none', cursor: 'pointer',
+                    background: mode === m ? 'rgba(200,169,110,0.15)' : 'transparent',
+                    color: mode === m ? '#c8a96e' : '#5a5870',
+                    borderRight: m !== 'preview' ? '1px solid rgba(255,255,255,0.08)' : 'none',
+                  }}>
+                    {m === 'edit' ? '편집' : m === 'split' ? '분할' : '미리보기'}
+                  </button>
+                ))}
+              </div>
+            )}
             <Button variant="secondary" size="sm" onClick={handleGenerate} disabled={generating}>
               {generating ? '생성 중...' : doc ? '↺ Regenerate' : '⚡ Generate Design'}
             </Button>
@@ -108,12 +124,12 @@ export default function ContentDesignPage() {
         </div>
       </Card>
 
-      {/* Editor */}
+      {/* Editor / Preview */}
       <div style={{ flex: 1, display: 'flex', gap: 16, minHeight: 0 }}>
-        <textarea
+        {mode !== 'preview' && <textarea
           value={editorContent}
           onChange={e => { setEditorContent(e.target.value); setDirty(true); }}
-          placeholder={'⚡ Generate Design 버튼으로 AI 설계 문서를 생성하세요.\n\n# 화면 설계서\n\n## 화면 목록\n\n## 컴포넌트 구조\n\n## 데이터 모델\n\n## 상태 흐름'}
+          placeholder={'⚡ Generate Design 버튼으로 AI 설계 문서를 생성하세요.'}
           disabled={generating}
           style={{
             flex: 1, resize: 'none',
@@ -121,9 +137,23 @@ export default function ContentDesignPage() {
             borderRadius: 12, padding: '18px 20px',
             color: '#c8c6c0', fontSize: 13, lineHeight: 1.7,
             fontFamily: '"SF Mono", "Fira Code", monospace',
-            outline: 'none', minHeight: 400,
+            outline: 'none',
           }}
-        />
+        />}
+
+        {(mode === 'preview' || mode === 'split') && editorContent && (
+          <div style={{
+            flex: mode === 'preview' ? 1 : undefined,
+            width: mode === 'split' ? '50%' : undefined,
+            flexShrink: 0,
+            background: 'rgba(255,255,255,0.015)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            borderRadius: 12, padding: '20px 24px',
+            overflow: 'auto',
+          }}>
+            <MarkdownPreview content={editorContent} />
+          </div>
+        )}
       </div>
 
       {isApproved && (

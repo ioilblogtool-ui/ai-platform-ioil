@@ -7,6 +7,37 @@ const { logActivity } = require('../lib/activity');
 const router = express.Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// ─── 프로젝트 컨텍스트 (bigyocalc.com / blog-tool 레포) ───────────────────────
+const PROJECT_CONTEXT = `
+## 프로젝트 스택 컨텍스트 (bigyocalc.com)
+- **프레임워크**: Astro SSG (정적 사이트 생성)
+- **배포**: Cloudflare Pages — main 브랜치 푸시 = 즉시 라이브
+- **레포**: https://github.com/ioilblogtool-ui/blog-tool
+
+### 계산기(calculator) 파일 구조 — 신규 추가 시 4개 파일 필요
+\`\`\`
+src/pages/tools/{slug}/index.astro   # 페이지 템플릿
+src/data/tools.ts                    # 메타데이터 레지스트리 (항목 추가)
+src/scripts/{slug}.js                # 클라이언트 계산 로직
+src/styles/{slug}.scss               # 페이지 전용 스타일
+\`\`\`
+
+### 레이아웃 쉘 3종 (계산기용)
+- \`SimpleToolShell\` — 입력 → 결과 단순 구조
+- \`CompareToolShell\` — 두 항목 비교 구조
+- \`TimelineToolShell\` — 시간축 기반 추이 구조
+
+### 리포트(report) 파일 구조
+\`\`\`
+src/pages/reports/{slug}/index.astro  # 페이지
+src/data/reports.ts                   # 메타데이터 레지스트리
+\`\`\`
+
+### 배포 체크리스트
+- \`npm run build\` 성공 확인 후 커밋
+- main 머지 → Cloudflare Pages 자동 배포
+`.trim();
+
 // job 생성 → Claude 호출 → job 업데이트 공통 헬퍼
 async function runJob({ content_item_id, user_id, job_type, model = 'claude', systemPrompt, userPrompt }) {
   // 1. job 생성
@@ -20,7 +51,7 @@ async function runJob({ content_item_id, user_id, job_type, model = 'claude', sy
     // 2. Claude 호출
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     });
@@ -149,7 +180,10 @@ router.post('/plan', requireAuth, async (req, res) => {
 
   const systemPrompt = `당신은 1인 디지털 콘텐츠 사업자를 위한 프로덕트 매니저입니다.
 주어진 콘텐츠 정보를 바탕으로 상세한 기획 문서(plan)를 Markdown 형식으로 작성합니다.
-기획 문서는 개발자가 실제 구현에 참고할 수 있는 수준으로 구체적이어야 합니다.${template_content ? '\n\n다음 템플릿 구조를 참고하세요:\n' + template_content : ''}`;
+기획 문서는 개발자가 실제 구현에 참고할 수 있는 수준으로 구체적이어야 합니다.
+
+${PROJECT_CONTEXT}
+${template_content ? '\n\n다음 템플릿 구조를 참고하세요:\n' + template_content : ''}`;
 
   const userPrompt = `콘텐츠 기본 정보:
 - 제목: ${item.title}
@@ -238,7 +272,10 @@ router.post('/design', requireAuth, async (req, res) => {
 
   const systemPrompt = `당신은 UI/UX 설계 전문가입니다.
 기획 문서를 바탕으로 화면 설계서(design)를 Markdown 형식으로 작성합니다.
-화면 목록, 컴포넌트 구조, 데이터 모델, 상태 흐름을 포함하세요.`;
+화면 목록, 컴포넌트 구조, 데이터 모델, 상태 흐름을 포함하세요.
+계산기라면 3종 레이아웃 쉘(SimpleToolShell / CompareToolShell / TimelineToolShell) 중 적합한 것을 명시하세요.
+
+${PROJECT_CONTEXT}`;
 
   const userPrompt = `콘텐츠: ${item.title} (${item.content_type} / ${item.category})
 
@@ -321,7 +358,15 @@ router.post('/dev-request', requireAuth, async (req, res) => {
   const systemPrompt = `당신은 시니어 개발 리드입니다.
 설계 문서를 바탕으로 ${target_model === 'claude' ? 'Claude Code' : target_model}에게 전달할 개발 요청 문서를 Markdown으로 작성합니다.
 목표, 참고 문서, 구현 요구사항, 수정 대상 파일, 완료 기준을 포함하세요.
-${target_model === 'claude' ? 'Claude Code가 바로 실행할 수 있는 명확한 지시 형식으로 작성하세요.' : ''}`;
+${target_model === 'claude' ? 'Claude Code가 바로 실행할 수 있는 명확한 지시 형식으로 작성하세요.' : ''}
+
+${PROJECT_CONTEXT}
+
+개발 요청서 작성 시 반드시 포함할 항목:
+- 신규 계산기라면 생성할 4개 파일 경로 명시 (astro / tools.ts 등록 / js / scss)
+- 리포트라면 astro + reports.ts 등록 명시
+- 적합한 레이아웃 쉘 선택 이유
+- \`npm run build\` 성공 확인 후 main 머지 지시`;
 
   const userPrompt = `작업 유형: ${styleDesc}
 대상 모델: ${target_model}
