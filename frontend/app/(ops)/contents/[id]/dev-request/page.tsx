@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getDocuments, generateDevRequest, updateDocument, getJobs } from '@/lib/api';
+import { getDocuments, generateDevRequest, updateDocument, getJobs, createDocument } from '@/lib/api';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import { DocStatusBadge } from '@/components/StatusBadge';
@@ -102,11 +102,20 @@ export default function ContentDevRequestPage() {
   }
 
   async function handleSave() {
-    if (!doc) return;
     setSaving(true);
     try {
-      const updated = await updateDocument(doc.id, { content: editorContent });
-      setDoc(updated);
+      if (!doc) {
+        const created = await createDocument({
+          content_item_id: id,
+          doc_type: 'dev_request',
+          content: editorContent,
+          generated_by: 'manual',
+        });
+        setDoc(created);
+      } else {
+        const updated = await updateDocument(doc.id, { content: editorContent });
+        setDoc(updated);
+      }
       setDirty(false);
     } catch (e: any) { alert(e.message); }
     setSaving(false);
@@ -173,11 +182,11 @@ export default function ContentDevRequestPage() {
                 </span>
               ) : doc ? '↺ Regenerate' : '⚡ Generate Dev Request'}
             </Button>
-            {doc && !generating && <>
-              <Button variant="secondary" size="sm" onClick={handleSave} disabled={saving || !dirty}>
+            {!generating && <>
+              <Button variant="secondary" size="sm" onClick={handleSave} disabled={saving || (!dirty && !!doc) || !editorContent.trim()}>
                 {saving ? '저장 중...' : '저장'}
               </Button>
-              <Button variant="secondary" size="sm" onClick={handleCopy}>
+              <Button variant="secondary" size="sm" onClick={handleCopy} disabled={!editorContent.trim()}>
                 {copied ? '✓ Copied!' : '⎘ Copy'}
               </Button>
             </>}

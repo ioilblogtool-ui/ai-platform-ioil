@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getContent, getDocuments, generatePlan, updateDocument, approveDocument, getJobs, getTemplates, getContentIdeas } from '@/lib/api';
+import { getContent, getDocuments, generatePlan, updateDocument, approveDocument, getJobs, getTemplates, getContentIdeas, createDocument } from '@/lib/api';
 import Card, { CardHeader, CardTitle } from '@/components/Card';
 import Button from '@/components/Button';
 import { DocStatusBadge } from '@/components/StatusBadge';
@@ -100,22 +100,34 @@ export default function ContentPlanPage() {
   }
 
   async function handleSave() {
-    if (!doc) return;
     setSaving(true);
     try {
-      const updated = await updateDocument(doc.id, { content: editorContent });
-      setDoc(updated);
+      if (!doc) {
+        const created = await createDocument({
+          content_item_id: id,
+          doc_type: 'plan',
+          content: editorContent,
+          generated_by: 'manual',
+        });
+        setDoc(created);
+      } else {
+        const updated = await updateDocument(doc.id, { content: editorContent });
+        setDoc(updated);
+      }
       setDirty(false);
     } catch (e: any) { alert(e.message); }
     setSaving(false);
   }
 
   async function handleApprove() {
-    if (!doc) return;
+    if (!editorContent.trim()) return;
     if (dirty) await handleSave();
     setApproving(true);
     try {
-      await approveDocument(doc.id);
+      const currentDocs = await getDocuments({ content_item_id: id, doc_type: 'plan' });
+      const currentDoc = doc || currentDocs?.[0];
+      if (!currentDoc) throw new Error('승인할 Plan 문서가 없습니다.');
+      await approveDocument(currentDoc.id);
       await loadDocuments();
     } catch (e: any) { alert(e.message); }
     setApproving(false);
@@ -149,7 +161,7 @@ export default function ContentPlanPage() {
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
-            {doc && !generating && (
+            {!generating && (
               <div style={{ display: 'flex', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, overflow: 'hidden' }}>
                 {(['edit', 'split', 'preview'] as const).map(m => (
                   <button key={m} onClick={() => setMode(m)} style={{
@@ -171,16 +183,16 @@ export default function ContentPlanPage() {
                 </span>
               ) : doc ? '↺ Regenerate' : '⚡ Generate Plan'}
             </Button>
-            {doc && !generating && (
+            {!generating && (
               <>
-                <Button variant="secondary" size="sm" onClick={handleSave} disabled={saving || !dirty}>
+                <Button variant="secondary" size="sm" onClick={handleSave} disabled={saving || (!dirty && !!doc) || !editorContent.trim()}>
                   {saving ? '저장 중...' : '저장'}
                 </Button>
                 <Button
                   variant={isApproved ? 'ghost' : 'primary'}
                   size="sm"
                   onClick={handleApprove}
-                  disabled={approving || isApproved}
+                  disabled={approving || isApproved || !editorContent.trim()}
                 >
                   {isApproved ? '✓ Approved' : approving ? '처리 중...' : 'Approve →'}
                 </Button>

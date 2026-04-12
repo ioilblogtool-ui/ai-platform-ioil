@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getContent, getDocuments, generateDesign, updateDocument, approveDocument, getJobs, getTemplates } from '@/lib/api';
+import { getContent, getDocuments, generateDesign, updateDocument, approveDocument, getJobs, getTemplates, createDocument } from '@/lib/api';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import { DocStatusBadge } from '@/components/StatusBadge';
@@ -94,21 +94,33 @@ export default function ContentDesignPage() {
   }
 
   async function handleSave() {
-    if (!doc) return;
     setSaving(true);
     try {
-      const updated = await updateDocument(doc.id, { content: editorContent });
-      setDoc(updated);
+      if (!doc) {
+        const created = await createDocument({
+          content_item_id: id,
+          doc_type: 'design',
+          content: editorContent,
+          generated_by: 'manual',
+        });
+        setDoc(created);
+      } else {
+        const updated = await updateDocument(doc.id, { content: editorContent });
+        setDoc(updated);
+      }
       setDirty(false);
     } catch (e: any) { alert(e.message); }
     setSaving(false);
   }
 
   async function handleApprove() {
-    if (!doc) return;
+    if (!editorContent.trim()) return;
     if (dirty) await handleSave();
     try {
-      await approveDocument(doc.id);
+      const currentDocs = await getDocuments({ content_item_id: id, doc_type: 'design' });
+      const currentDoc = doc || currentDocs?.[0];
+      if (!currentDoc) throw new Error('승인할 Design 문서가 없습니다.');
+      await approveDocument(currentDoc.id);
       await loadDocuments();
     } catch (e: any) { alert(e.message); }
   }
@@ -147,7 +159,7 @@ export default function ContentDesignPage() {
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {doc && !generating && (
+            {!generating && (
               <div style={{ display: 'flex', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, overflow: 'hidden' }}>
                 {(['edit', 'split', 'preview'] as const).map(m => (
                   <button key={m} onClick={() => setMode(m)} style={{
@@ -169,11 +181,11 @@ export default function ContentDesignPage() {
                 </span>
               ) : doc ? '↺ Regenerate' : '⚡ Generate Design'}
             </Button>
-            {doc && !generating && <>
-              <Button variant="secondary" size="sm" onClick={handleSave} disabled={saving || !dirty}>
+            {!generating && <>
+              <Button variant="secondary" size="sm" onClick={handleSave} disabled={saving || (!dirty && !!doc) || !editorContent.trim()}>
                 {saving ? '저장 중...' : '저장'}
               </Button>
-              <Button variant={isApproved ? 'ghost' : 'primary'} size="sm" onClick={handleApprove} disabled={isApproved}>
+              <Button variant={isApproved ? 'ghost' : 'primary'} size="sm" onClick={handleApprove} disabled={isApproved || !editorContent.trim()}>
                 {isApproved ? '✓ Approved' : 'Approve →'}
               </Button>
             </>}
