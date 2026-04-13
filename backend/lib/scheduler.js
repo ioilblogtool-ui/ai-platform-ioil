@@ -22,7 +22,7 @@ const PRIORITY_CATEGORIES = [
 ];
 
 async function runAutoGenerate(userId) {
-  console.log(`[Scheduler] 자동 아이디어 생성 시작 — userId: ${userId}`);
+  console.log(`[Scheduler] 자동 아이디어 생성 시작`);
 
   const { data: existing } = await supabase
     .from('content_items')
@@ -179,20 +179,22 @@ ${existingList}
 }
 
 function startScheduler() {
-  const userId = process.env.SCHEDULER_USER_ID;
+  const userId = (process.env.SCHEDULER_USER_ID || '').replace(/^[=\s]+/, '').trim();
   if (!userId) {
     console.warn('[Scheduler] SCHEDULER_USER_ID 환경변수가 없어 스케줄러를 시작하지 않습니다.');
     return;
   }
 
-  // 매일 오전 9시 KST (= UTC 00:00)
-  cron.schedule('0 0 * * *', () => {
+
+
+  // 매일 자정 KST 00:00 (= UTC 15:00)
+  cron.schedule('0 15 * * *', () => {
     runAutoGenerate(userId).catch(err =>
       console.error('[Scheduler] 오류:', err.message)
     );
   }, { timezone: 'UTC' });
 
-  console.log('[Scheduler] 매일 09:00 KST 자동 아이디어 생성 스케줄 등록됨');
+  console.log('[Scheduler] 매일 00:00 KST 자동 아이디어 생성 스케줄 등록됨');
 }
 
 module.exports = { startScheduler, runAutoGenerate };

@@ -36,6 +36,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+
 // 라우트 — 기존
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
