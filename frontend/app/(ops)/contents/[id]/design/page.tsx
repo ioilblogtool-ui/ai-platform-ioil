@@ -53,12 +53,12 @@ export default function ContentDesignPage() {
 
   async function loadDocuments() {
     try {
-      const [designDocs, planDocs] = await Promise.all([
+      const [designRes, planRes] = await Promise.all([
         getDocuments({ content_item_id: id, doc_type: 'design' }),
         getDocuments({ content_item_id: id, doc_type: 'plan' }),
       ]);
-      setPlanDoc(planDocs?.[0] || null);
-      const existing = designDocs?.[0] || null;
+      setPlanDoc((planRes?.data ?? planRes)?.[0] || null);
+      const existing = (designRes?.data ?? designRes)?.[0] || null;
       setDoc(existing);
       if (existing) setEditorContent(existing.content || '');
 
@@ -117,8 +117,8 @@ export default function ContentDesignPage() {
     if (!editorContent.trim()) return;
     if (dirty) await handleSave();
     try {
-      const currentDocs = await getDocuments({ content_item_id: id, doc_type: 'design' });
-      const currentDoc = doc || currentDocs?.[0];
+      const currentRes = await getDocuments({ content_item_id: id, doc_type: 'design' });
+      const currentDoc = doc || (currentRes?.data ?? currentRes)?.[0];
       if (!currentDoc) throw new Error('승인할 Design 문서가 없습니다.');
       await approveDocument(currentDoc.id);
       await loadDocuments();

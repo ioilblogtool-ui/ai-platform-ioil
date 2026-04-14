@@ -63,12 +63,12 @@ export default function ContentDevRequestPage() {
 
   async function loadDocuments() {
     try {
-      const [devDocs, dsnDocs] = await Promise.all([
+      const [devRes, dsnRes] = await Promise.all([
         getDocuments({ content_item_id: id, doc_type: 'dev_request' }),
         getDocuments({ content_item_id: id, doc_type: 'design' }),
       ]);
-      setDesignDoc(dsnDocs?.[0] || null);
-      const existing = devDocs?.[0] || null;
+      setDesignDoc((dsnRes?.data ?? dsnRes)?.[0] || null);
+      const existing = (devRes?.data ?? devRes)?.[0] || null;
       setDoc(existing);
       if (existing) setEditorContent(existing.content || '');
 

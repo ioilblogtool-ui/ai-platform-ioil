@@ -33,13 +33,13 @@ export default function DashboardPage() {
     const [statsRes, contentsRes, docsRes, jobsRes, deploysRes] = await Promise.allSettled([
       getContentStats(),
       getContents({ limit: 5 }),
-      getDocuments(),
+      getDocuments({ limit: 5 } as any),
       getJobs({ status: 'failed', limit: 5 }),
       getDeployments({ limit: 5 }),
     ]);
     if (statsRes.status === 'fulfilled') setStats(statsRes.value || {});
     if (contentsRes.status === 'fulfilled') setRecentContents((contentsRes.value?.data || []).slice(0, 5));
-    if (docsRes.status === 'fulfilled') setRecentDocs((docsRes.value || []).slice(0, 4));
+    if (docsRes.status === 'fulfilled') setRecentDocs((docsRes.value?.data || []).slice(0, 4));
     if (jobsRes.status === 'fulfilled') setFailedJobs(jobsRes.value?.data || []);
     if (deploysRes.status === 'fulfilled') setRecentDeploys((deploysRes.value?.data || []).slice(0, 4));
     setLoading(false);

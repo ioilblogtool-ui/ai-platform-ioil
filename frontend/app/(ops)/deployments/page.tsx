@@ -42,8 +42,8 @@ export default function DeploymentsPage() {
     try {
       const params: any = { limit: 100 };
       if (statusFilter !== 'all') params.status = statusFilter;
-      const data = await getDeployments(params);
-      setDeployments(Array.isArray(data) ? data : []);
+      const res = await getDeployments(params);
+      setDeployments(Array.isArray(res) ? res : (res?.data ?? []));
     } catch {}
     setLoading(false);
   }

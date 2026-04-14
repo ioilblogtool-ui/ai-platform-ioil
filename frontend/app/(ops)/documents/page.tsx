@@ -35,8 +35,8 @@ export default function DocumentsPage() {
       const params: any = {};
       if (typeFilter !== 'all') params.doc_type = typeFilter;
       if (statusFilter !== 'all') params.status = statusFilter;
-      const data = await getDocuments(params);
-      setDocs(Array.isArray(data) ? data : []);
+      const res = await getDocuments(params);
+      setDocs(res?.data ?? (Array.isArray(res) ? res : []));
     } catch {}
     setLoading(false);
   }
@@ -130,7 +130,7 @@ export default function DocumentsPage() {
 
         {/* Documents list */}
         {loading ? (
-          <Card style={{ padding: 0, overflow: 'hidden' }}>
+          <Card style={{ padding: 0, overflow: 'auto', maxHeight: 'calc(100vh - 300px)' }}>
             <SkeletonRows rows={8} cols={6} />
           </Card>
         ) : filtered.length === 0 ? (
@@ -142,6 +142,7 @@ export default function DocumentsPage() {
               display: 'grid', gridTemplateColumns: '110px 1fr 160px 100px 120px 80px',
               padding: '10px 18px', borderBottom: '1px solid rgba(255,255,255,0.05)',
               fontSize: 10, color: '#3a3850', textTransform: 'uppercase', letterSpacing: '0.06em',
+              position: 'sticky', top: 0, zIndex: 1, background: '#111114',
             }}>
               <span>Type</span><span>File Path</span><span>Content</span><span>Status</span><span>Updated</span><span></span>
             </div>

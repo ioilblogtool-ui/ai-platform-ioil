@@ -5,23 +5,29 @@ const { logActivity } = require('../lib/activity');
 
 const router = express.Router();
 
-// GET /api/documents?content_item_id=&doc_type=&status=
+// GET /api/documents?content_item_id=&doc_type=&status=&limit=&offset=
 router.get('/', requireAuth, async (req, res) => {
-  const { content_item_id, doc_type, status } = req.query;
+  const { content_item_id, doc_type, status, limit = 20, offset = 0 } = req.query;
+
+  // content_item_id로 필터링 시 content 포함 (탭 에디터용), 전체 목록은 제외
+  const fields = content_item_id
+    ? '*'
+    : 'id, content_item_id, doc_type, version, status, generated_by, created_at, updated_at';
 
   let query = supabase
     .from('documents')
-    .select('*')
+    .select(fields, { count: 'exact' })
     .eq('user_id', req.user.id)
-    .order('updated_at', { ascending: false });
+    .order('updated_at', { ascending: false })
+    .range(Number(offset), Number(offset) + Number(limit) - 1);
 
   if (content_item_id) query = query.eq('content_item_id', content_item_id);
   if (doc_type)        query = query.eq('doc_type', doc_type);
   if (status)          query = query.eq('status', status);
 
-  const { data, error } = await query;
+  const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  res.json({ data, total: count });
 });
 
 // GET /api/documents/:id

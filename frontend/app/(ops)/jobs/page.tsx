@@ -124,7 +124,7 @@ export default function JobsPage() {
 
         {/* Jobs Table */}
         {loading ? (
-          <Card style={{ padding: 0, overflow: 'hidden' }}>
+          <Card style={{ padding: 0, overflow: 'auto', maxHeight: 'calc(100vh - 300px)' }}>
             <SkeletonRows rows={8} cols={6} />
           </Card>
         ) : jobs.length === 0 ? (
@@ -136,6 +136,7 @@ export default function JobsPage() {
               display: 'grid', gridTemplateColumns: '160px 1fr 140px 100px 120px 80px',
               padding: '10px 18px', borderBottom: '1px solid rgba(255,255,255,0.05)',
               fontSize: 10, color: '#3a3850', textTransform: 'uppercase', letterSpacing: '0.06em',
+              position: 'sticky', top: 0, zIndex: 1, background: '#111114',
             }}>
               <span>Status</span><span>Content</span><span>Type</span><span>Model</span><span>Time</span><span></span>
             </div>

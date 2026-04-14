@@ -62,8 +62,8 @@ export default function ContentPlanPage() {
   async function loadDocuments() {
     try {
       // 문서 로드
-      const docs = await getDocuments({ content_item_id: id, doc_type: 'plan' });
-      const existing = docs?.[0] || null;
+      const res = await getDocuments({ content_item_id: id, doc_type: 'plan' });
+      const existing = (res?.data ?? res)?.[0] || null;
       setDoc(existing);
       if (existing) setEditorContent(existing.content || '');
 
@@ -124,8 +124,8 @@ export default function ContentPlanPage() {
     if (dirty) await handleSave();
     setApproving(true);
     try {
-      const currentDocs = await getDocuments({ content_item_id: id, doc_type: 'plan' });
-      const currentDoc = doc || currentDocs?.[0];
+      const currentRes = await getDocuments({ content_item_id: id, doc_type: 'plan' });
+      const currentDoc = doc || (currentRes?.data ?? currentRes)?.[0];
       if (!currentDoc) throw new Error('승인할 Plan 문서가 없습니다.');
       await approveDocument(currentDoc.id);
       await loadDocuments();

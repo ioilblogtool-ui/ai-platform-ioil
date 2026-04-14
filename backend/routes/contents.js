@@ -50,17 +50,20 @@ router.get('/', requireAuth, async (req, res) => {
 
 // GET /api/contents/stats  — Dashboard KPI
 router.get('/stats', requireAuth, async (req, res) => {
-  const { data, error } = await supabase
-    .from('content_items')
-    .select('status')
-    .eq('user_id', req.user.id);
-
-  if (error) return res.status(500).json({ error: error.message });
-
-  const counts = {};
-  for (const row of data) {
-    counts[row.status] = (counts[row.status] || 0) + 1;
+  const { data, error } = await supabase.rpc('get_content_stats', { p_user_id: req.user.id });
+  if (error) {
+    // RPC 없으면 fallback
+    const { data: rows, error: e2 } = await supabase
+      .from('content_items')
+      .select('status')
+      .eq('user_id', req.user.id);
+    if (e2) return res.status(500).json({ error: e2.message });
+    const counts = {};
+    for (const row of rows) counts[row.status] = (counts[row.status] || 0) + 1;
+    return res.json(counts);
   }
+  const counts = {};
+  for (const row of data) counts[row.status] = Number(row.count);
   res.json(counts);
 });
 
@@ -287,8 +290,8 @@ router.delete('/:id', requireAuth, async (req, res) => {
 // 계산기 1개 + 리포트 1개 자동 아이디어 생성 및 등록
 
 const PRIORITY_CATEGORIES = [
-  '투자/연금/노후', '출산/임신', '주식/코인',
-  '부동산', '육아', '직업/연봉', '자동차유지비',
+  '투자/연금/노후', '출산/임신', '주식/코인', '여행/항공/숙박비', 'AI/생산성/자동화',
+  '부동산', '육아', '직업/연봉', '세금/절세' , '결혼/웨딩', '복지/지원금',
   '보험', '금융/대출', '생활비절약', '교육비',
 ];
 
