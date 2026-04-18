@@ -68,7 +68,7 @@ export default function ParentingPage() {
 
   useEffect(() => { load(); }, []);
 
-  const childNames = [...new Set(records.map(r => r.child_name).filter(Boolean))] as string[];
+  const childNames = Array.from(new Set(records.map(r => r.child_name).filter(Boolean))) as string[];
   const filtered = filter ? records.filter(r => r.record_type === filter) : records;
   const firstChild = records.find(r => r.child_name);
   const age = firstChild ? calcAge(firstChild.birth_date) : null;

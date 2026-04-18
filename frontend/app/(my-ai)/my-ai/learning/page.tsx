@@ -36,7 +36,7 @@ export default function LearningPage() {
   // 최근 7일 통계
   const recent7 = records.slice(0, 7);
   const totalMins = recent7.reduce((s, r) => s + (Number(r.data.study_min) || 0), 0);
-  const subjects = [...new Set(records.map(r => r.data.subject).filter(Boolean))];
+  const subjects = Array.from(new Set(records.map(r => r.data.subject).filter(Boolean)));
   const studyDays = recent7.filter(r => Number(r.data.study_min) > 0).length;
 
   async function handleSave() {
