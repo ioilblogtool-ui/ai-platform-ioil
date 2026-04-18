@@ -484,3 +484,288 @@ export async function updateTemplate(id: string, params: Partial<{
 export async function deleteTemplate(id: string) {
   return apiFetch(`/api/templates/${id}`, { method: 'DELETE' });
 }
+
+// =============================================
+// 나만의 AI — Types
+// =============================================
+
+export type AssetType =
+  | 'real_estate'   // 부동산
+  | 'stock'         // 주식·ETF
+  | 'cash'          // 현금·예금·적금
+  | 'pension'       // 퇴직금·연금
+  | 'gold'          // 금·귀금속
+  | 'crypto'        // 암호화폐
+  | 'loan_mortgage' // 담보대출
+  | 'loan_credit'   // 신용대출
+  | 'loan_minus'    // 마이너스통장
+  | 'debt'          // 기타부채 (레거시)
+  | 'other';        // 기타
+export type ModuleKey = 'assets' | 'budget' | 'realestate' | 'portfolio' | 'parenting' | 'health' | 'career' | 'learning' | 'news';
+
+export interface UserAsset {
+  id: string;
+  asset_type: AssetType;
+  name: string;
+  amount: number;
+  metadata: Record<string, any>;
+  recorded_at: string;
+  created_at: string;
+}
+
+export interface BudgetRecord {
+  id: string;
+  record_type: 'income' | 'expense';
+  category: string | null;
+  amount: number;
+  memo: string | null;
+  recorded_at: string;
+  created_at: string;
+}
+
+export interface RealestateItem {
+  id: string;
+  name: string;
+  address: string | null;
+  area_sqm: number | null;
+  interest: 'buy' | 'rent' | null;
+  price: number | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface UserKeyword {
+  id: string;
+  keyword: string;
+  category: string | null;
+  priority: number;
+  created_at: string;
+}
+
+export interface AiReport {
+  id: string;
+  module_key: string;
+  report_type: 'daily' | 'weekly' | 'monthly';
+  title: string;
+  content?: string;
+  generated_at: string;
+}
+
+// =============================================
+// 나만의 AI — Modules
+// =============================================
+
+export async function getMyAiModules() {
+  return apiFetch('/api/my-ai/modules');
+}
+
+export async function updateMyAiModule(key: ModuleKey, params: { is_active?: boolean; config?: Record<string, any>; schedule?: Record<string, any> }) {
+  return apiFetch(`/api/my-ai/modules/${key}`, { method: 'PUT', body: JSON.stringify(params) });
+}
+
+// =============================================
+// 나만의 AI — Assets
+// =============================================
+
+export async function getAssets(params?: { asset_type?: AssetType; recorded_at?: string }) {
+  return apiFetch(`/api/my-ai/assets${buildQuery(params)}`);
+}
+
+export async function createAsset(params: { asset_type: AssetType; name: string; amount: number; metadata?: Record<string, any>; recorded_at?: string }) {
+  return apiFetch('/api/my-ai/assets', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function updateAsset(id: string, params: Partial<{ asset_type: AssetType; name: string; amount: number; metadata: Record<string, any>; recorded_at: string }>) {
+  return apiFetch(`/api/my-ai/assets/${id}`, { method: 'PUT', body: JSON.stringify(params) });
+}
+
+export async function deleteAsset(id: string) {
+  return apiFetch(`/api/my-ai/assets/${id}`, { method: 'DELETE' });
+}
+
+// =============================================
+// 나만의 AI — Asset Snapshots
+// =============================================
+
+export type SnapshotPayload = {
+  snapshot_date: string;
+  stock?: number; real_estate?: number; cash?: number; pension?: number;
+  gold?: number; crypto?: number; other?: number;
+  loan_mortgage?: number; loan_credit?: number; loan_minus?: number;
+  note?: string; detail?: Record<string, any>;
+};
+
+export async function getSnapshots(params?: { from?: string; to?: string; limit?: number }) {
+  return apiFetch(`/api/my-ai/snapshots${buildQuery(params)}`);
+}
+
+export async function getSnapshotStats() {
+  return apiFetch('/api/my-ai/snapshots/stats');
+}
+
+export async function createSnapshot(params: SnapshotPayload) {
+  return apiFetch('/api/my-ai/snapshots', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function updateSnapshot(id: string, params: Partial<SnapshotPayload>) {
+  return apiFetch(`/api/my-ai/snapshots/${id}`, { method: 'PUT', body: JSON.stringify(params) });
+}
+
+export async function deleteSnapshot(id: string) {
+  return apiFetch(`/api/my-ai/snapshots/${id}`, { method: 'DELETE' });
+}
+
+// =============================================
+// 나만의 AI — Asset Goals
+// =============================================
+
+export type GoalType = 'annual' | 'longterm';
+
+export type GoalPayload = {
+  goal_type: GoalType; name: string; target_amount: number; target_year: number; sort_order?: number; description?: string;
+};
+
+export async function getGoals(params?: { goal_type?: GoalType }) {
+  return apiFetch(`/api/my-ai/goals${buildQuery(params)}`);
+}
+
+export async function createGoal(params: GoalPayload) {
+  return apiFetch('/api/my-ai/goals', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function updateGoal(id: string, params: Partial<GoalPayload & { is_achieved: boolean; achieved_at: string }>) {
+  return apiFetch(`/api/my-ai/goals/${id}`, { method: 'PUT', body: JSON.stringify(params) });
+}
+
+export async function deleteGoal(id: string) {
+  return apiFetch(`/api/my-ai/goals/${id}`, { method: 'DELETE' });
+}
+
+export async function getMilestones() {
+  return apiFetch('/api/my-ai/goals/milestones');
+}
+
+// =============================================
+// 나만의 AI — Budget
+// =============================================
+
+export async function getBudget(params?: { year?: number; month?: number; record_type?: string }) {
+  return apiFetch(`/api/my-ai/budget${buildQuery(params)}`);
+}
+
+export async function createBudgetRecord(params: { record_type: 'income' | 'expense'; category?: string; amount: number; memo?: string; recorded_at?: string }) {
+  return apiFetch('/api/my-ai/budget', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function deleteBudgetRecord(id: string) {
+  return apiFetch(`/api/my-ai/budget/${id}`, { method: 'DELETE' });
+}
+
+// =============================================
+// 나만의 AI — Realestate
+// =============================================
+
+export async function getRealestate() {
+  return apiFetch('/api/my-ai/realestate');
+}
+
+export async function createRealestateItem(params: { name: string; address?: string; area_sqm?: number; interest?: 'buy' | 'rent'; price?: number; note?: string }) {
+  return apiFetch('/api/my-ai/realestate', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function updateRealestateItem(id: string, params: Partial<{ name: string; address: string; area_sqm: number; interest: 'buy' | 'rent'; price: number; note: string }>) {
+  return apiFetch(`/api/my-ai/realestate/${id}`, { method: 'PUT', body: JSON.stringify(params) });
+}
+
+export async function deleteRealestateItem(id: string) {
+  return apiFetch(`/api/my-ai/realestate/${id}`, { method: 'DELETE' });
+}
+
+// =============================================
+// 나만의 AI — Keywords
+// =============================================
+
+export async function getKeywords() {
+  return apiFetch('/api/my-ai/keywords');
+}
+
+export async function createKeyword(params: { keyword: string; category?: string; priority?: number }) {
+  return apiFetch('/api/my-ai/keywords', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function deleteKeyword(id: string) {
+  return apiFetch(`/api/my-ai/keywords/${id}`, { method: 'DELETE' });
+}
+
+// =============================================
+// 나만의 AI — Reports
+// =============================================
+
+export async function getMyAiReports(params?: { module_key?: string; report_type?: string; limit?: number; offset?: number }) {
+  return apiFetch(`/api/my-ai/reports${buildQuery(params)}`);
+}
+
+export async function getMyAiReport(id: string) {
+  return apiFetch(`/api/my-ai/reports/${id}`);
+}
+
+export async function generateMyAiReport(module_key: ModuleKey): Promise<{ data: AiReport }> {
+  return apiFetch('/api/my-ai/reports/generate', { method: 'POST', body: JSON.stringify({ module_key }) });
+}
+
+// =============================================
+// 나만의 AI — Parenting
+// =============================================
+
+export interface ParentingRecord {
+  id: string;
+  child_name: string | null;
+  birth_date: string | null;
+  record_type: 'growth' | 'milestone' | 'health' | 'daily';
+  data: Record<string, any>;
+  recorded_at: string;
+  created_at: string;
+}
+
+export async function getParentingRecords(params?: { child_name?: string; record_type?: string }) {
+  return apiFetch(`/api/my-ai/parenting${buildQuery(params)}`);
+}
+
+export async function createParentingRecord(params: {
+  child_name?: string;
+  birth_date?: string;
+  record_type: 'growth' | 'milestone' | 'health' | 'daily';
+  data?: Record<string, any>;
+  recorded_at?: string;
+}) {
+  return apiFetch('/api/my-ai/parenting', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function deleteParentingRecord(id: string) {
+  return apiFetch(`/api/my-ai/parenting/${id}`, { method: 'DELETE' });
+}
+
+// =============================================
+// 나만의 AI — Generic Module Records (portfolio/health/career/learning)
+// =============================================
+
+export interface ModuleRecord {
+  id: string;
+  module_key: string;
+  record_type: string | null;
+  data: Record<string, any>;
+  recorded_at: string;
+  created_at: string;
+}
+
+export async function getModuleRecords(module_key: string, params?: { record_type?: string; limit?: number }) {
+  return apiFetch(`/api/my-ai/records${buildQuery({ module_key, ...params })}`);
+}
+
+export async function createModuleRecord(params: { module_key: string; record_type?: string; data: Record<string, any>; recorded_at?: string }) {
+  return apiFetch('/api/my-ai/records', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function deleteModuleRecord(id: string) {
+  return apiFetch(`/api/my-ai/records/${id}`, { method: 'DELETE' });
+}

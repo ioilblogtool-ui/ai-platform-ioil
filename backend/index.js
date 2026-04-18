@@ -16,6 +16,16 @@ const deploymentsRoutes = require('./routes/deployments');
 const activityRoutes = require('./routes/activity');
 const promptsRoutes = require('./routes/prompts');
 const templatesRoutes = require('./routes/templates');
+const myAiModulesRoutes    = require('./routes/my-ai/modules');
+const myAiAssetsRoutes     = require('./routes/my-ai/assets');
+const myAiBudgetRoutes     = require('./routes/my-ai/budget');
+const myAiRealestateRoutes = require('./routes/my-ai/realestate');
+const myAiKeywordsRoutes   = require('./routes/my-ai/keywords');
+const myAiParentingRoutes  = require('./routes/my-ai/parenting');
+const myAiReportsRoutes    = require('./routes/my-ai/reports');
+const myAiRecordsRoutes    = require('./routes/my-ai/records');
+const myAiSnapshotsRoutes  = require('./routes/my-ai/snapshots');
+const myAiGoalsRoutes      = require('./routes/my-ai/goals');
 const { startScheduler } = require('./lib/scheduler');
 
 const app = express();
@@ -54,6 +64,18 @@ app.use('/api/deployments', deploymentsRoutes);
 app.use('/api/activity', activityRoutes);
 app.use('/api/prompts', promptsRoutes);
 app.use('/api/templates', templatesRoutes);
+
+// 라우트 — 나만의 AI
+app.use('/api/my-ai/modules',    myAiModulesRoutes);
+app.use('/api/my-ai/assets',     myAiAssetsRoutes);
+app.use('/api/my-ai/budget',     myAiBudgetRoutes);
+app.use('/api/my-ai/realestate', myAiRealestateRoutes);
+app.use('/api/my-ai/keywords',   myAiKeywordsRoutes);
+app.use('/api/my-ai/parenting',  myAiParentingRoutes);
+app.use('/api/my-ai/reports',    myAiReportsRoutes);
+app.use('/api/my-ai/records',    myAiRecordsRoutes);
+app.use('/api/my-ai/snapshots',  myAiSnapshotsRoutes);
+app.use('/api/my-ai/goals',      myAiGoalsRoutes);
 
 // 에러 핸들러
 app.use((err, req, res, next) => {
