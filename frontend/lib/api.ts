@@ -649,8 +649,68 @@ export async function getMilestones() {
 // 나만의 AI — Budget
 // =============================================
 
+export interface BudgetFixedItem {
+  id: string;
+  record_type: 'income' | 'expense';
+  category: string;
+  subcategory: string | null;
+  person: string | null;
+  amount: number;
+  memo: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface MonthSummary {
+  month: number;
+  income: number;
+  expense: number;
+  balance: number;
+}
+
+export interface BudgetCompare {
+  prev:     { income: number; expense: number; balance: number };
+  lastYear: { income: number; expense: number; balance: number };
+}
+
 export async function getBudget(params?: { year?: number; month?: number; record_type?: string }) {
   return apiFetch(`/api/my-ai/budget${buildQuery(params)}`);
+}
+
+export async function getBudgetYearly(year: number): Promise<{ year: number; months: MonthSummary[]; total: { income: number; expense: number; balance: number } }> {
+  return apiFetch(`/api/my-ai/budget/yearly${buildQuery({ year })}`);
+}
+
+export async function getBudgetCompare(year: number, month: number): Promise<BudgetCompare> {
+  return apiFetch(`/api/my-ai/budget/compare${buildQuery({ year, month })}`);
+}
+
+export async function getBudgetFixed(): Promise<{ data: BudgetFixedItem[] }> {
+  return apiFetch('/api/my-ai/budget/fixed');
+}
+
+export async function createBudgetFixed(params: {
+  category: string; subcategory?: string; person?: string;
+  amount: number; memo: string; record_type?: 'income' | 'expense'; sort_order?: number;
+}): Promise<{ data: BudgetFixedItem }> {
+  return apiFetch('/api/my-ai/budget/fixed', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function updateBudgetFixed(id: string, params: Partial<{
+  category: string; subcategory: string; person: string;
+  amount: number; memo: string; record_type: 'income' | 'expense';
+  sort_order: number; is_active: boolean;
+}>): Promise<{ data: BudgetFixedItem }> {
+  return apiFetch(`/api/my-ai/budget/fixed/${id}`, { method: 'PUT', body: JSON.stringify(params) });
+}
+
+export async function deleteBudgetFixed(id: string) {
+  return apiFetch(`/api/my-ai/budget/fixed/${id}`, { method: 'DELETE' });
+}
+
+export async function applyBudgetFixed(year: number, month: number): Promise<{ applied: number; message?: string }> {
+  return apiFetch('/api/my-ai/budget/fixed/apply', { method: 'POST', body: JSON.stringify({ year, month }) });
 }
 
 export async function createBudgetRecord(params: { record_type: 'income' | 'expense'; category?: string; amount: number; memo?: string; recorded_at?: string }) {
@@ -709,8 +769,8 @@ export async function getMyAiReport(id: string) {
   return apiFetch(`/api/my-ai/reports/${id}`);
 }
 
-export async function generateMyAiReport(module_key: ModuleKey): Promise<{ data: AiReport }> {
-  return apiFetch('/api/my-ai/reports/generate', { method: 'POST', body: JSON.stringify({ module_key }) });
+export async function generateMyAiReport(module_key: ModuleKey, opts?: { year?: number; month?: number }): Promise<{ data: AiReport }> {
+  return apiFetch('/api/my-ai/reports/generate', { method: 'POST', body: JSON.stringify({ module_key, ...opts }) });
 }
 
 // =============================================

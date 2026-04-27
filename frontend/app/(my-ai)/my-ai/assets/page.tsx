@@ -7,6 +7,7 @@ import {
   getGoals, createGoal, updateGoal, deleteGoal,
   getMilestones,
   generateMyAiReport, getMyAiReports, getMyAiReport,
+  getBudget,
   UserAsset, AssetType, SnapshotPayload, GoalPayload, GoalType,
 } from '@/lib/api';
 
@@ -363,23 +364,31 @@ export default function AssetsPage() {
   const [assetSaving, setAssetSaving] = useState(false);
   const [assetError,  setAssetError]  = useState('');
 
+  const [budgetSummary, setBudgetSummary] = useState<{ income: number; expense: number; balance: number } | null>(null);
+  const [budgetReports, setBudgetReports] = useState<any[]>([]);
+
   async function load() {
     setLoading(true);
     setError('');
+    const now = new Date();
     try {
-      const [assetsRes, snapsRes, statsRes, goalsRes, milestonesRes, reportsRes] = await Promise.all([
+      const [assetsRes, snapsRes, statsRes, goalsRes, milestonesRes, reportsRes, budgetRes, budgetRptsRes] = await Promise.all([
         getAssets(),
         getSnapshots({ limit: 36 }),
         getSnapshotStats(),
         getGoals(),
         getMilestones(),
         getMyAiReports({ module_key: 'assets', limit: 24 }),
+        getBudget({ year: now.getFullYear(), month: now.getMonth() + 1 }),
+        getMyAiReports({ module_key: 'budget', limit: 6 }),
       ]);
       setAssets(assetsRes?.data ?? []);
       setSnapshots(snapsRes?.data ?? []);
       setStats(statsRes?.data ?? null);
       setGoals(goalsRes?.data ?? []);
       setMilestones(milestonesRes?.data ?? []);
+      setBudgetSummary(budgetRes?.summary ?? null);
+      setBudgetReports(budgetRptsRes?.data ?? []);
 
       const list = reportsRes?.data ?? [];
       setReports(list);
@@ -726,6 +735,47 @@ export default function AssetsPage() {
           </div>
         ))}
       </div>
+
+      {/* ── 이달 가계부 현금흐름 참고 ────────────────────────────────────────── */}
+      {budgetSummary !== null && (
+        <div style={{ ...s.card, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' as const }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#4A4870', flexShrink: 0 }}>
+            이달 현금흐름 ({new Date().getFullYear()}년 {new Date().getMonth() + 1}월)
+          </div>
+          <div style={{ display: 'flex', gap: 20, flex: 1, flexWrap: 'wrap' as const }}>
+            <div>
+              <div style={{ fontSize: 10, color: '#9490C0', marginBottom: 2 }}>수입</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#1D9E75' }}>+{formatCompact(budgetSummary.income)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: '#9490C0', marginBottom: 2 }}>지출</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#E53E3E' }}>-{formatCompact(budgetSummary.expense)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: '#9490C0', marginBottom: 2 }}>잉여금 (자산 전환 가능)</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: budgetSummary.balance >= 0 ? '#534AB7' : '#E53E3E' }}>
+                {budgetSummary.balance >= 0 ? '+' : ''}{formatCompact(budgetSummary.balance)}
+              </div>
+            </div>
+            {budgetSummary.income > 0 && (
+              <div>
+                <div style={{ fontSize: 10, color: '#9490C0', marginBottom: 2 }}>저축률</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#534AB7' }}>
+                  {Math.round((budgetSummary.balance / budgetSummary.income) * 100)}%
+                </div>
+              </div>
+            )}
+          </div>
+          {budgetReports.length > 0 && (
+            <div style={{ flexShrink: 0, fontSize: 11, color: '#9490C0' }}>
+              가계부 리포트 {budgetReports.length}개 보유
+            </div>
+          )}
+          <a href="/my-ai/budget" style={{ fontSize: 11, color: '#534AB7', textDecoration: 'none', padding: '5px 12px', border: '1px solid rgba(83,74,183,0.3)', borderRadius: 8, flexShrink: 0 }}>
+            가계부 보기 →
+          </a>
+        </div>
+      )}
 
       {/* ── 자산 구성 + 자산 항목 ────────────────────────────────────────────── */}
       <div style={s.twoCol}>

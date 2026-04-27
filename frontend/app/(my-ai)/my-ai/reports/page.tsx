@@ -3,6 +3,84 @@
 import { useEffect, useState } from 'react';
 import { getMyAiReports, getMyAiReport, AiReport } from '@/lib/api';
 
+function MdView({ content }: { content: string }) {
+  if (!content) return <div style={{ color: '#C0BDDA', fontSize: 13, padding: '20px 0', textAlign: 'center' as const }}>내용이 없습니다.</div>;
+
+  const bold = (t: string): React.ReactNode[] =>
+    t.split(/(\*\*[^*]+\*\*)/g).map((p, i) =>
+      p.startsWith('**') && p.endsWith('**') ? <strong key={i}>{p.slice(2, -2)}</strong> : p
+    );
+
+  const lines = content.split('\n');
+  const nodes: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^---+$/.test(line.trim())) {
+      nodes.push(<hr key={i} style={{ border: 'none', borderTop: '1px solid rgba(83,74,183,0.1)', margin: '14px 0' }} />);
+      i++; continue;
+    }
+    if (line.startsWith('# ')) {
+      nodes.push(<div key={i} style={{ fontSize: 16, fontWeight: 700, color: '#1A1830', margin: '0 0 10px', lineHeight: 1.4 }}>{bold(line.slice(2))}</div>);
+      i++; continue;
+    }
+    if (line.startsWith('## ')) {
+      nodes.push(<div key={i} style={{ fontSize: 13, fontWeight: 700, color: '#534AB7', margin: '16px 0 6px', lineHeight: 1.4 }}>{bold(line.slice(3))}</div>);
+      i++; continue;
+    }
+    if (line.startsWith('### ')) {
+      nodes.push(<div key={i} style={{ fontSize: 12, fontWeight: 700, color: '#4A4870', margin: '12px 0 4px' }}>{bold(line.slice(4))}</div>);
+      i++; continue;
+    }
+    if (line.startsWith('> ')) {
+      nodes.push(
+        <div key={i} style={{ borderLeft: '3px solid #534AB7', paddingLeft: 10, margin: '6px 0', color: '#7B72D4', fontSize: 12, lineHeight: 1.65 }}>
+          {bold(line.slice(2))}
+        </div>
+      );
+      i++; continue;
+    }
+    if (line.startsWith('- ')) {
+      nodes.push(
+        <div key={i} style={{ display: 'flex', gap: 7, margin: '3px 0', fontSize: 12, color: '#4A4870', lineHeight: 1.65 }}>
+          <span style={{ color: '#534AB7', flexShrink: 0 }}>•</span>
+          <span>{bold(line.slice(2))}</span>
+        </div>
+      );
+      i++; continue;
+    }
+    if (line.startsWith('|')) {
+      const rows: string[] = [];
+      while (i < lines.length && lines[i].startsWith('|')) { rows.push(lines[i]); i++; }
+      const parsed = rows.filter(r => !/^[\s|:-]+$/.test(r)).map(r => r.split('|').filter((_, j) => j > 0 && j < r.split('|').length - 1).map(c => c.trim()));
+      nodes.push(
+        <div key={`t${i}`} style={{ overflowX: 'auto', margin: '8px 0' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+            {parsed.map((row, ri) => (
+              <tr key={ri} style={{ background: ri === 0 ? '#F4F3FF' : ri % 2 === 0 ? '#FAFAFE' : '#fff' }}>
+                {row.map((cell, ci) => (
+                  <td key={ci} style={{ padding: '5px 8px', border: '1px solid rgba(83,74,183,0.1)', color: ri === 0 ? '#534AB7' : '#4A4870', fontWeight: ri === 0 ? 700 : 400 }}>
+                    {bold(cell)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </table>
+        </div>
+      );
+      continue;
+    }
+    if (line.trim() === '') {
+      nodes.push(<div key={i} style={{ height: 6 }} />);
+    } else {
+      nodes.push(<div key={i} style={{ fontSize: 12, color: '#4A4870', lineHeight: 1.75, marginBottom: 2 }}>{bold(line)}</div>);
+    }
+    i++;
+  }
+  return <>{nodes}</>;
+}
+
 const MODULE_META: Record<string, { label: string; dot: string; icon: string }> = {
   assets:     { label: '자산 관리',    dot: '#854F0B', icon: '💰' },
   budget:     { label: '가계부',       dot: '#1D9E75', icon: '📊' },
@@ -200,7 +278,10 @@ export default function ReportsPage() {
               <span style={s.detailClose} onClick={() => { setSelected(null); setDetailContent(''); }}>×</span>
             </div>
             <div style={s.detailContent}>
-              {detailLoading ? '불러오는 중...' : detailContent}
+              {detailLoading
+                ? <div style={{ color: '#9490C0', fontSize: 13, textAlign: 'center', padding: '20px 0' }}>불러오는 중...</div>
+                : <MdView content={detailContent} />
+              }
             </div>
           </div>
         )}
@@ -244,5 +325,5 @@ const s: Record<string, React.CSSProperties> = {
   detailTitle:     { fontSize: 14, fontWeight: 600, color: '#1A1830', lineHeight: 1.4, marginBottom: 4 },
   detailDate:      { fontSize: 11, color: '#9490C0' },
   detailClose:     { fontSize: 18, color: '#9490C0', cursor: 'pointer', lineHeight: 1, flexShrink: 0, padding: '0 4px' },
-  detailContent:   { fontSize: 13, lineHeight: 1.85, color: '#4A4870', whiteSpace: 'pre-wrap' as const, maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' as const },
+  detailContent:   { maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' as const, background: '#F8F7FF', borderRadius: 10, padding: '14px' },
 };

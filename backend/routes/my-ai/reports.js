@@ -118,6 +118,19 @@ router.post('/generate', requireAuth, async (req, res) => {
         ? Math.round(annualRemain / remainMonths)
         : null;
 
+      // 이번 달 가계부 요약 (자산 리포트 컨텍스트용)
+      const budgetFrom = `${yyyy}-${mm}-01`;
+      const budgetTo   = new Date(yyyy, parseInt(mm), 0).toISOString().slice(0, 10);
+      const { data: budgetRecs } = await supabase
+        .from('budget_records')
+        .select('record_type, amount')
+        .eq('user_id', req.user.id)
+        .gte('recorded_at', budgetFrom)
+        .lte('recorded_at', budgetTo);
+      const budgetIncome  = (budgetRecs || []).filter(r => r.record_type === 'income' ).reduce((s, r) => s + Number(r.amount), 0);
+      const budgetExpense = (budgetRecs || []).filter(r => r.record_type === 'expense').reduce((s, r) => s + Number(r.amount), 0);
+      const budgetBalance = budgetIncome - budgetExpense;
+
       // 사용자명
       const { data: userRow } = await supabase
         .from('users').select('email').eq('id', req.user.id).single();
@@ -179,7 +192,7 @@ router.post('/generate', requireAuth, async (req, res) => {
         : '  미설정';
 
       promptContent = `[리포트 기준 정보]
-기준월: ${yyyy}년 ${mm}월
+기준월: ${yyyy}년 ${parseInt(mm)}월
 사용자: ${userName}님
 기록 기간: ${first?.snapshot_date ?? '-'} ~ ${latest?.snapshot_date ?? '-'} (${snapshots?.length ?? 0}개월)
 
@@ -215,6 +228,12 @@ ${annualGoal
 
 ■ 장기 목표:
 ${longtermGoalsText}
+
+[이번 달 가계부 현황 — 현금흐름 참고]
+- 이달 수입:    ₩${budgetIncome.toLocaleString()}${budgetIncome === 0 ? ' (미입력)' : ''}
+- 이달 지출:    ₩${budgetExpense.toLocaleString()}${budgetExpense === 0 ? ' (미입력)' : ''}
+- 이달 잉여금:  ₩${budgetBalance.toLocaleString()}${budgetIncome === 0 ? ' (미입력)' : ''}
+- 잠재 저축 가능액: ₩${budgetBalance > 0 ? budgetBalance.toLocaleString() : 0} (이 금액이 자산으로 전환될 때 영향 분석 필요)
 
 [최근 6개월 추이]
 날짜 | 순자산 | 전월 증감률
@@ -256,17 +275,22 @@ ${recentTable || '데이터 없음'}
 
 ---
 
-## 4. 전문가 분석 및 인사이트
+## 4. 현금흐름 & 가계부 연계 분석
+[이달 수입·지출·잉여금이 자산 증가에 미치는 영향, 잉여금의 자산 배분 제언 — 2~3문단]
+
+---
+
+## 5. 전문가 분석 및 인사이트
 [이달 자산 변화의 핵심 요인 분석, 시장 맥락 포함 — 3~5문단]
 
 ---
 
-## 5. 다음 달 액션 플랜
+## 6. 다음 달 액션 플랜
 [구체적이고 실행 가능한 3~5가지 제언, 체크리스트 형식]
 
 ---
 
-## 6. 누적 성과 요약
+## 7. 누적 성과 요약
 [기록 시작일, 최초 자산, 현재 자산, 총 증가액, 총 증가율, CAGR 표]
 
 ---
@@ -278,14 +302,105 @@ ${recentTable || '데이터 없음'}
     } else if (module_key === 'budget') {
       report_type = 'monthly';
       const now = new Date();
+      const yyyy = Number(req.body.year)  || now.getFullYear();
+      const mm   = Number(req.body.month) || (now.getMonth() + 1);
+      const mmStr = String(mm).padStart(2, '0');
+      const from  = `${yyyy}-${mmStr}-01`;
+      const to    = new Date(yyyy, mm, 0).toISOString().slice(0, 10);
+
+      // 이번 달 내역
       const { data: records } = await supabase
         .from('budget_records')
         .select('record_type, category, amount, memo, recorded_at')
         .eq('user_id', req.user.id)
-        .gte('recorded_at', `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`)
+        .gte('recorded_at', from)
+        .lte('recorded_at', to)
         .order('recorded_at', { ascending: false });
-      contextData = { records };
-      promptContent = `다음은 이번 달 수입/지출 내역입니다:\n${JSON.stringify(records, null, 2)}\n\n소비 패턴 분석, 카테고리별 지출 요약, 절약 제언을 포함한 월간 가계부 리포트를 한국어로 작성해주세요.`;
+
+      // 전월 집계
+      const prevYear  = mm === 1 ? yyyy - 1 : yyyy;
+      const prevMonth = mm === 1 ? 12 : mm - 1;
+      const prevFrom  = `${prevYear}-${String(prevMonth).padStart(2, '0')}-01`;
+      const prevTo    = new Date(prevYear, prevMonth, 0).toISOString().slice(0, 10);
+      const { data: prevRecs } = await supabase
+        .from('budget_records')
+        .select('record_type, amount')
+        .eq('user_id', req.user.id)
+        .gte('recorded_at', prevFrom)
+        .lte('recorded_at', prevTo);
+
+      // 고정비 목록
+      const { data: fixedItems } = await supabase
+        .from('budget_fixed_items')
+        .select('category, memo, amount, record_type, is_active')
+        .eq('user_id', req.user.id)
+        .eq('is_active', true);
+
+      const recs = records || [];
+      const income  = recs.filter(r => r.record_type === 'income' ).reduce((s, r) => s + Number(r.amount), 0);
+      const expense = recs.filter(r => r.record_type === 'expense').reduce((s, r) => s + Number(r.amount), 0);
+      const balance = income - expense;
+      const savRate = income > 0 ? ((balance / income) * 100).toFixed(1) : '0';
+
+      const prevInc = (prevRecs || []).filter(r => r.record_type === 'income' ).reduce((s, r) => s + Number(r.amount), 0);
+      const prevExp = (prevRecs || []).filter(r => r.record_type === 'expense').reduce((s, r) => s + Number(r.amount), 0);
+
+      // 카테고리별 지출 집계
+      const catMap = {};
+      recs.filter(r => r.record_type === 'expense').forEach(r => {
+        const cat = r.category || '기타';
+        catMap[cat] = (catMap[cat] || 0) + Number(r.amount);
+      });
+      const catText = Object.entries(catMap)
+        .sort((a, b) => b[1] - a[1])
+        .map(([cat, amt]) => `  - ${cat}: ₩${Number(amt).toLocaleString()} (${expense > 0 ? ((Number(amt)/expense)*100).toFixed(1) : 0}%)`)
+        .join('\n');
+
+      const fixedText = (fixedItems || []).length > 0
+        ? (fixedItems || []).map(f => `  - [${f.category}] ${f.memo}: ₩${Number(f.amount).toLocaleString()}`).join('\n')
+        : '  (등록된 고정비 없음)';
+
+      contextData = { records, income, expense, balance };
+
+      promptContent = `[${yyyy}년 ${mm}월 가계부 현황]
+총 수입:    ₩${income.toLocaleString()}
+총 지출:    ₩${expense.toLocaleString()}
+잔액:       ₩${balance.toLocaleString()} (저축률 ${savRate}%)
+
+[전월(${prevYear}년 ${prevMonth}월) 대비]
+수입 변화: ₩${prevInc.toLocaleString()} → ₩${income.toLocaleString()} (${prevInc > 0 ? (((income-prevInc)/prevInc)*100).toFixed(1) : '-'}%)
+지출 변화: ₩${prevExp.toLocaleString()} → ₩${expense.toLocaleString()} (${prevExp > 0 ? (((expense-prevExp)/prevExp)*100).toFixed(1) : '-'}%)
+
+[카테고리별 지출]
+${catText || '  (지출 내역 없음)'}
+
+[등록된 고정비 항목]
+${fixedText}
+
+[이번 달 전체 내역 (${recs.length}건)]
+${recs.slice(0, 40).map(r => `  [${r.recorded_at}] ${r.record_type === 'income' ? '수입' : '지출'} | ${r.category || '-'} | ${r.memo || '-'} | ₩${Number(r.amount).toLocaleString()}`).join('\n') || '  (내역 없음)'}
+
+위 데이터를 바탕으로 아래 구조에 맞춰 전문적인 월간 가계부 리포트를 한국어로 작성해주세요.
+
+# ${yyyy}년 ${mm}월 가계부 리포트
+
+## 1. 이달의 수입·지출 요약
+[수입/지출/잔액/저축률 핵심 수치 표 및 해석]
+
+## 2. 전월 대비 분석
+[수입·지출 변화 원인 분석 및 주요 특이사항]
+
+## 3. 카테고리별 지출 분석
+[카테고리별 지출 비중과 적정성 평가, 과지출 항목 지적]
+
+## 4. 고정비 관리 현황
+[고정비 대비 변동비 비율, 고정비 최적화 여부]
+
+## 5. 저축률 및 재무 건전성 평가
+[이달 저축률 평가, 권장 저축률(20~30%)과 비교]
+
+## 6. 다음 달 절약 제언
+[구체적이고 실행 가능한 3~5가지 절약 방안]`;
     } else if (module_key === 'realestate') {
       report_type = 'weekly';
       const { data: watchlist } = await supabase
