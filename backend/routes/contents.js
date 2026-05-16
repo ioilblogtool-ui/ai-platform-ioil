@@ -3,6 +3,11 @@ const Anthropic = require('@anthropic-ai/sdk');
 const supabase = require('../lib/supabase');
 const { requireAuth } = require('../middleware/auth');
 const { logActivity } = require('../lib/activity');
+const {
+  buildAutoIdeaContext,
+  buildNoveltyInstructions,
+  findConflictingGeneratedIdeas,
+} = require('../lib/contentIdeaPolicy');
 
 const router = express.Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -317,6 +322,16 @@ router.post('/auto-generate', requireAuth, async (req, res) => {
     PRIORITY_CATEGORIES.find(c => !recentCategories.includes(c)) ||
     PRIORITY_CATEGORIES[0];
 
+  let ideaContext;
+  try {
+    ideaContext = await buildAutoIdeaContext(supabase, userId);
+  } catch (err) {
+    return res.status(500).json({ error: `기존 아이디어 조회 실패: ${err.message}` });
+  }
+  const selectedCategory = ideaContext.todayCategory;
+  const expandedCategoryList = ideaContext.categoryList;
+  const noveltyInstructions = buildNoveltyInstructions(ideaContext);
+
   // 3. Claude에게 아이디어 2개 요청
   const systemPrompt = `당신은 bigyocalc.com의 콘텐츠 전략가입니다.
 비교계산소는 한국 생활 밀착형 계산기·리포트 사이트로,
@@ -335,11 +350,14 @@ router.post('/auto-generate', requireAuth, async (req, res) => {
 ━━━ 우선 카테고리 ━━━
 투자/연금/노후, 출산/임신, 주식/코인, 부동산, 육아, 직업/연봉,
 자동차유지비, 보험, 금융/대출, 생활비절약, 교육비
+${expandedCategoryList}
 
-오늘 우선 카테고리: ${todayCategory}
+오늘 우선 카테고리: ${selectedCategory}
 
 ━━━ 이미 등록된 콘텐츠 (중복·유사 금지) ━━━
 ${existingList}
+
+${noveltyInstructions}
 
 위 목록과 제목·주제·키워드가 70% 이상 겹치면 절대 안 됨.
 
@@ -383,6 +401,13 @@ ${existingList}
     const text = response.content[0].text;
     parsed = parseJsonSafe(text);
     if (!parsed) throw new Error('JSON 파싱 실패');
+
+    const conflicts = findConflictingGeneratedIdeas(parsed, ideaContext.excludedIdeas);
+    if (conflicts.length) {
+      return res.status(409).json({
+        error: `이미 저장된 아이디어와 겹치는 후보가 생성되어 저장하지 않았습니다: ${conflicts.map(c => c.title).join(', ')}`,
+      });
+    }
   } catch (err) {
     return res.status(500).json({ error: `아이디어 생성 실패: ${err.message}` });
   }
@@ -399,7 +424,7 @@ ${existingList}
         user_id: userId,
         title: idea.title,
         content_type: type,
-        category: idea.category || todayCategory,
+        category: idea.category || selectedCategory,
         seo_keyword: idea.seo_keyword || '',
         raw_idea: idea.raw_idea || '',
         target_path: idea.target_path || '',
@@ -455,7 +480,7 @@ ${existingList}
     results.push({ item, idea: generatedIdea, scores: idea.scores, affiliate_hint: idea.affiliate_hint, series_expansion: idea.series_expansion });
   }
 
-  res.json({ today_category: todayCategory, items: results });
+  res.json({ today_category: selectedCategory, items: results });
 });
 
 module.exports = router;

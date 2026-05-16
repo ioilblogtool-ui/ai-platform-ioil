@@ -2,6 +2,11 @@ const cron = require('node-cron');
 const Anthropic = require('@anthropic-ai/sdk');
 const supabase = require('./supabase');
 const { logActivity } = require('./activity');
+const {
+  buildAutoIdeaContext,
+  buildNoveltyInstructions,
+  findConflictingGeneratedIdeas,
+} = require('./contentIdeaPolicy');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -41,6 +46,17 @@ async function runAutoGenerate(userId) {
     PRIORITY_CATEGORIES.find(c => !recentCategories.includes(c)) ||
     PRIORITY_CATEGORIES[0];
 
+  let ideaContext;
+  try {
+    ideaContext = await buildAutoIdeaContext(supabase, userId);
+  } catch (err) {
+    console.error('[Scheduler] 기존 아이디어 조회 실패:', err.message);
+    return;
+  }
+  const selectedCategory = ideaContext.todayCategory;
+  const expandedCategoryList = ideaContext.categoryList;
+  const noveltyInstructions = buildNoveltyInstructions(ideaContext);
+
   const systemPrompt = `당신은 bigyocalc.com의 콘텐츠 전략가입니다.
 비교계산소는 한국 생활 밀착형 계산기·리포트 사이트로,
 검색 유입 → 광고 수익 → 상품 제휴 전환이 수익 모델입니다.
@@ -58,11 +74,14 @@ async function runAutoGenerate(userId) {
 ━━━ 우선 카테고리 ━━━
 투자/연금/노후, 출산/임신, 주식/코인, 부동산, 육아, 직업/연봉,
 자동차유지비, 보험, 금융/대출, 생활비절약, 교육비
+${expandedCategoryList}
 
-오늘 우선 카테고리: ${todayCategory}
+오늘 우선 카테고리: ${selectedCategory}
 
 ━━━ 이미 등록된 콘텐츠 (중복·유사 금지) ━━━
 ${existingList}
+
+${noveltyInstructions}
 
 위 목록과 제목·주제·키워드가 70% 이상 겹치면 절대 안 됨.
 
@@ -105,6 +124,12 @@ ${existingList}
     });
     parsed = parseJsonSafe(response.content[0].text);
     if (!parsed) throw new Error('JSON 파싱 실패');
+
+    const conflicts = findConflictingGeneratedIdeas(parsed, ideaContext.excludedIdeas);
+    if (conflicts.length) {
+      console.warn(`[Scheduler] 이미 저장된 아이디어와 겹쳐 저장하지 않습니다: ${conflicts.map(c => c.title).join(', ')}`);
+      return;
+    }
   } catch (err) {
     console.error('[Scheduler] 아이디어 생성 실패:', err.message);
     return;
@@ -120,7 +145,7 @@ ${existingList}
         user_id: userId,
         title: idea.title,
         content_type: type,
-        category: idea.category || todayCategory,
+        category: idea.category || selectedCategory,
         seo_keyword: idea.seo_keyword || '',
         raw_idea: idea.raw_idea || '',
         target_path: idea.target_path || '',
