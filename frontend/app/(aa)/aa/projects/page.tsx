@@ -71,7 +71,7 @@ export default function AaProjectsPage() {
               <thead><tr><th style={th}>이름</th><th style={th}>Draft</th><th style={th}>Draft 수정</th><th style={th}>만든 날</th></tr></thead>
               <tbody>
                 {projects.map((p) => (
-                  <tr key={p.id} onClick={() => router.push(`/aa/projects/${p.id}/architecture`)} style={{ cursor: 'pointer' }}
+                  <tr key={p.id} onClick={() => router.push(`/aa/projects/${p.id}`)} style={{ cursor: 'pointer' }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
                     <td style={td}>

@@ -173,7 +173,7 @@ function ProjectRequirements({ id }: { id: string }) {
 
   return (
     <>
-      <PageHeader title="요구사항" breadcrumbs={[{ label: 'AA Workbench', href: '/aa/projects' }, ...(project ? [{ label: project }] : [])]}
+      <PageHeader title="요구사항" breadcrumbs={[{ label: 'AA Workbench', href: '/aa/projects' }, ...(project ? [{ label: project, href: detail }] : [])]}
         actions={<div style={rowStyle}>
           <Button onClick={() => router.push(`${detail}/architecture`)}>Studio</Button>
           <Button variant="primary" disabled={busy} onClick={() => { setEditor(null); setActionError(''); setConfirmDelete(null); setInUse(null); }}>＋ 요구사항 등록</Button>

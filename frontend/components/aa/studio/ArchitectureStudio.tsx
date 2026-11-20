@@ -187,6 +187,9 @@ function Studio({ projectId }: { projectId: string }) {
         <button onClick={() => router.push('/aa/projects')} title="프로젝트 목록" style={btn(true)}>◀</button>
         <button onClick={() => setPaletteOpen((v) => !v)} title="팔레트 접기·펴기 ([)" style={btn(true)}>☰</button>
         <b style={{ fontSize: 13.5 }}>{s.projectName || '…'}</b>
+        <button onClick={() => router.push(`/aa/projects/${projectId}`)} style={btn()}>
+          개요
+        </button>
         <button onClick={() => router.push(`/aa/projects/${projectId}/requirements`)} style={btn()}>
           요구사항
         </button>
