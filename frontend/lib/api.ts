@@ -1,7 +1,7 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 // 토큰 가져오기 (Supabase 세션에서)
-async function getToken(): Promise<string | null> {
+export async function getToken(): Promise<string | null> {
   const { createClient } = await import('./supabase');
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
@@ -9,7 +9,7 @@ async function getToken(): Promise<string | null> {
 }
 
 // undefined 값 제거한 쿼리스트링 생성
-function buildQuery(params?: Record<string, any>): string {
+export function buildQuery(params?: Record<string, any>): string {
   if (!params) return '';
   const clean = Object.fromEntries(
     Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '')

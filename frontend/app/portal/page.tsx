@@ -8,7 +8,7 @@ export default function PortalPage() {
   const router = useRouter();
   const supabase = createClient();
   const [userName, setUserName] = useState('');
-  const [hoveredCard, setHoveredCard] = useState<'ops' | 'ai' | null>(null);
+  const [hoveredCard, setHoveredCard] = useState<'ops' | 'ai' | 'aa' | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -85,6 +85,29 @@ export default function PortalPage() {
               ))}
             </div>
           </div>
+
+          {/* AA Workbench 카드 */}
+          <div
+            style={{
+              ...styles.card,
+              ...styles.cardOps,
+              ...(hoveredCard === 'aa' ? styles.cardOpsHover : {}),
+            }}
+            onMouseEnter={() => setHoveredCard('aa')}
+            onMouseLeave={() => setHoveredCard(null)}
+            onClick={() => router.push('/aa')}
+          >
+            <div style={styles.cardIconOps}>◫</div>
+            <div style={styles.cardBadgeOps}>설계</div>
+            <div style={styles.cardTitleOps}>AA Workbench</div>
+            <div style={styles.cardDescOps}>
+              아키텍처를 그리고 저장하고
+              <br />검토·검증 이력을 남기는 설계 도구
+            </div>
+            <div style={{ ...styles.cardBtn, ...styles.cardBtnOps }}>
+              이동하기 →
+            </div>
+          </div>
         </div>
       </div>
 
@@ -156,6 +179,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     gap: 20,
     alignItems: 'stretch',
+    flexWrap: 'wrap',          // 카드 3장 — 좁은 창에서는 줄바꿈
+    justifyContent: 'center',
   },
 
   // 카드 공통
