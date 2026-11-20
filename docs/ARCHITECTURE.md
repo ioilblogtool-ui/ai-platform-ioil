@@ -8,7 +8,7 @@
 ## 시스템 개요
 
 ```
-Browser (Next.js 14)
+Browser (Next.js 16)
       │  HTTP + Supabase Auth JWT
       ▼
 Express.js API (port 4000)
@@ -27,10 +27,12 @@ Claude claude-sonnet-4-6
 ```
 ai-platform-ioil/
 │
-├── frontend/                        ← Next.js 14 App Router
+├── frontend/                        ← Next.js 16 App Router
 │   ├── app/
 │   │   ├── layout.tsx               ← 루트 레이아웃 (폰트·전역 CSS)
-│   │   ├── page.tsx                 ← / 루트 (→ /dashboard 리디렉트)
+│   │   ├── page.tsx                 ← / 루트 (→ /portal 리디렉트)
+│   │   ├── portal/                  ← Content Ops와 나만의 AI 선택
+│   │   ├── (my-ai)/                 ← 개인 대시보드
 │   │   ├── auth/                    ← /auth (로그인·회원가입)
 │   │   ├── chat/                    ← /chat (기존 채팅 UI — Content Ops와 독립)
 │   │   └── (ops)/                   ← Content Ops 라우트 그룹
@@ -80,7 +82,7 @@ ai-platform-ioil/
 │   ├── lib/
 │   │   ├── supabase.js              ← Supabase 서비스 롤 클라이언트
 │   │   ├── activity.js              ← logActivity(supabase, userId, ...) 헬퍼
-│   │   └── scheduler.js             ← node-cron 매일 KST 09:00 아이디어 자동 생성
+│   │   └── scheduler.js             ← 활성화 시 매일 자정 KST에 아이디어 생성
 │   └── routes/
 │       ├── auth.js                  ← POST /api/auth/*
 │       ├── chat.js                  ← POST /api/chat
@@ -111,7 +113,7 @@ ai-platform-ioil/
 ```
 Frontend (탭 페이지)
   → POST /api/generate/{type}  (contentItemId)
-  → generate.js: runJob(supabase, userId, contentItemId, jobType, generatorFn)
+  → generate.js: createJob() → runInBackground()
       ├── generation_jobs 에 'queued' 레코드 삽입
       ├── 비동기: Claude API 호출 (claude-sonnet-4-6)
       ├── parseJsonSafe() 로 응답 파싱
@@ -162,7 +164,7 @@ planned
   │  Design 문서 approve
   ▼
 designed
-  │  Dev Request 저장 후 수동 전환
+  │  Dev Request 승인 API 또는 수동 전환
   ▼
 ready_dev
   │  개발 시작 수동 전환
@@ -191,8 +193,9 @@ const qs = buildQuery({ status, page, limit });
 fetch(`/api/contents?${qs}`)
 ```
 
-### `runJob(...)` — `backend/routes/generate.js`
-모든 AI 생성 작업의 표준 래퍼. 큐 등록 → Claude 호출 → 결과 저장 → 상태 갱신.
+### `createJob()`과 `runInBackground()` — `backend/routes/generate.js`
+
+작업을 등록한 뒤 서버 프로세스에서 Claude 호출, 결과 저장, 상태 갱신을 처리한다.
 
 ### `parseJsonSafe(text)` — `backend/routes/generate.js`, `contents.js`
 Claude 응답의 ```json 마크다운 블록 제거 후 JSON 파싱.
@@ -216,6 +219,8 @@ Claude 응답의 ```json 마크다운 블록 제거 후 JSON 파싱.
 ### Frontend
 | 패키지 | 버전 | 용도 |
 |---|---|---|
-| next | 14.2.3 | 프레임워크 |
-| @supabase/ssr | ^0.3.0 | 서버사이드 인증 |
-| marked | ^18.0.0 | 마크다운 렌더링 |
+| next | 16.4.6 | 프레임워크 |
+| react | 19.3.1 | UI |
+| @supabase/ssr | 0.12.7 | Supabase 브라우저 클라이언트 구성 |
+| marked | 18.2.1 | 마크다운 파싱 |
+| dompurify | 3.4.18 | 미리보기 HTML 정화 |

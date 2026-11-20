@@ -10,7 +10,7 @@
 ### Anthropic Claude API
 - **SDK**: `@anthropic-ai/sdk` ^0.24.0
 - **사용 모델**: `claude-sonnet-4-6`
-- **주요 패턴**: `runJob()` 헬퍼 (`backend/routes/generate.js`)
+- **문서 생성 패턴**: `createJob()`으로 등록하고 `runInBackground()`로 실행 (`backend/routes/generate.js`)
 - **주의**: 응답이 ` ```json ` 블록으로 감싸질 수 있음 → `parseJsonSafe()` 필수
 
 ```javascript
@@ -47,8 +47,8 @@ import { createBrowserClient } from '@supabase/ssr';
 
 ---
 
-### Next.js 14 App Router
-- **버전**: 14.2.3
+### Next.js 16 App Router
+- **버전**: 16.4.6
 - **라우팅**: App Router (`app/` 디렉토리)
 - **레이아웃 그룹**: `(ops)/` — URL에 영향 없는 공통 레이아웃
 - **클라이언트 컴포넌트**: `'use client'` 선언 필수 (인터랙션·훅 사용 시)
@@ -58,30 +58,30 @@ import { createBrowserClient } from '@supabase/ssr';
 ### node-cron
 - **버전**: ^4.2.1
 - **사용처**: `backend/lib/scheduler.js`
-- **스케줄**: `'0 0 * * *'` (UTC 00:00 = KST 09:00)
+- **스케줄**: 활성화 시 `'0 15 * * *'` (UTC 15:00 = KST 00:00)
 
 ```javascript
 import cron from 'node-cron';
-cron.schedule('0 0 * * *', async () => {
-  // 매일 KST 09:00 실행
-});
+cron.schedule('0 15 * * *', async () => {
+  // 매일 KST 00:00 실행
+}, { timezone: 'UTC' });
 ```
 
 ---
 
 ### marked (마크다운 파서)
-- **버전**: ^18.0.0
+- **버전**: 18.2.1
 - **사용처**: `frontend/components/MarkdownPreview.tsx`
-- **주의**: XSS 방지를 위해 항상 `MarkdownPreview` 컴포넌트 사용
+- **HTML 정화**: `MarkdownPreview`에서 DOMPurify 사용
 
 ---
 
 ## 외부 서비스
 
 ### Railway (백엔드 배포)
-- Express 앱 자동 배포
+- `main`의 `backend/`를 Railpack으로 자동 배포하고 Node.js 24로 실행
 - 환경변수: Railway Dashboard Variables 탭에서 설정
-- `SCHEDULER_USER_ID` 반드시 설정 필요
+- `SCHEDULER_USER_ID`는 선택이며 운영에서는 비활성화
 
 ### Vercel (프론트엔드 배포)
 - Next.js 자동 인식 및 배포

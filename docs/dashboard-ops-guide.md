@@ -1,7 +1,7 @@
 # AI Platform — Dashboard 운영 가이드
 
 > 대상: 플랫폼 운영자 (1인 기업 대표)  
-> 최종 수정: 2026-04-11
+> 최종 수정: 2026-11-20
 
 ---
 
@@ -25,7 +25,7 @@
 ### 접근 경로
 
 ```
-로그인 → 자동으로 /dashboard 이동
+로그인 → /portal → Content Ops → /dashboard
 사이드바 상단 ⬡ 아이콘 클릭
 ```
 
@@ -112,8 +112,7 @@ PageHeader 우측의 버튼을 클릭하면 Claude가 **계산기 1개 + 리포�
 - 생성 결과가 DB에 저장되고 화면에 결과 카드가 표시됨
 - 각 결과 카드에서 **상세 보기 →** 클릭 시 해당 콘텐츠의 Overview 탭 이동
 
-> **자동 스케줄**: 매일 오전 09:00 KST에 백엔드에서 자동 실행 (Railway 배포 시)  
-> `SCHEDULER_USER_ID` 환경변수 설정 필요
+> **자동 스케줄**은 운영에서 비활성화되어 있다. 다시 설정하면 매일 자정 KST에 실행된다. 대시보드 버튼으로는 수동 생성할 수 있다.
 
 ---
 
@@ -140,10 +139,10 @@ PageHeader 우측의 버튼을 클릭하면 Claude가 **계산기 1개 + 리포�
 | Job 타입 | plan / design / dev_request / ideas |
 | 연결 콘텐츠 | 어떤 콘텐츠의 생성이 실패했는지 |
 | 오류 메시지 | API 오류, 타임아웃 등 원인 요약 |
-| Retry 버튼 | 즉시 재시도 (→ `/jobs`에서도 가능) |
+| View all 링크 | 실패 작업을 확인할 수 있는 Jobs 화면으로 이동 |
 
 > **주의**: Failed Jobs에 항목이 있으면 해당 콘텐츠의 문서가 없거나 구버전일 수 있다.  
-> 즉시 Retry하거나 `/jobs`에서 오류 원인 확인 후 대응.
+> `/jobs`에서 오류 원인을 확인한 뒤 해당 콘텐츠 탭에서 다시 생성한다.
 
 ---
 
@@ -238,11 +237,11 @@ PageHeader 우측의 버튼을 클릭하면 Claude가 **계산기 1개 + 리포�
    - Deployed 수가 전날보다 증가했는가? → 배포 완료 확인
 
 2. **Failed Jobs 패널 확인**
-   - 실패 항목이 있으면 즉시 Retry 또는 `/jobs`에서 오류 원인 파악
+   - 실패 항목이 있으면 `/jobs`에서 오류 원인 파악
    - 오래된 실패 작업은 [스킵] 처리로 정리
 
 3. **자동 생성 아이디어 확인** (스케줄러 설정 시)
-   - 매일 09:00 KST에 계산기 1개 + 리포트 1개 자동 등록
+   - 스케줄을 켠 환경에서는 매일 자정 KST에 계산기 1개와 리포트 1개 생성 시도
    - Contents → Idea 상태 콘텐츠에서 확인 → Overview AI 분석 카드 검토
 
 4. **Recent Documents 확인**
@@ -304,17 +303,15 @@ PageHeader 우측의 버튼을 클릭하면 Claude가 **계산기 1개 + 리포�
 **증상**: Failed Jobs 패널에 `plan — 부동산 세금 계산기` 표시
 
 ```
-① Failed Jobs → [Retry] 클릭
-   - 재시도 성공: Plan 탭에서 결과 확인
-   - 재시도 실패: /jobs 이동
+① Failed Jobs → /jobs 이동
 
 ② /jobs → 실패 행의 오류 메시지 확인
    - "rate_limit_error" → 1~2분 후 재시도
    - "context_length_exceeded" → 콘텐츠 내용 줄인 후 재시도
-   - "authentication_error" → backend .env의 ANTHROPIC_API_KEY 확인
+   - "authentication_error" → Railway Variables 또는 로컬 backend/.env의 ANTHROPIC_API_KEY 확인
 
-③ 원인 해결 후 [↺ 재시도] 클릭
-④ 해결 불가 시 [스킵] 클릭 → 작업 목록에서 제거
+③ 원인 해결 후 해당 콘텐츠 탭에서 다시 생성
+④ 실패 이력을 정리하려면 [스킵] 클릭
 ```
 
 ---
@@ -411,7 +408,7 @@ Plan/Design/Dev Request 결과가 마음에 들지 않을 때:
 
 ### Q. Jobs 목록에 실패 작업이 쌓여있다
 
-- [↺ 재시도] 클릭 → 성공 시 해결
+- Jobs의 [↺ 재시도]는 상태를 `queued`로 되돌린다. 실제 생성은 해당 콘텐츠 탭에서 다시 실행한다.
 - 반복 실패 시 [스킵] 클릭 → `skipped` 상태로 처리
 - `skipped` 상태가 DB에 없으면 Supabase SQL 실행 필요:
   ```sql
@@ -432,9 +429,14 @@ Plan/Design/Dev Request 결과가 마음에 들지 않을 때:
 
 ### Q. 자동 아이디어 생성 스케줄러가 작동하지 않는다
 
-- Railway Variables에 `SCHEDULER_USER_ID` 설정 여부 확인
-- 값은 Supabase → Authentication → Users → 본인 계정 UUID
-- 백엔드 로그에 `[Scheduler] 매일 09:00 KST 자동 아이디어 생성 스케줄 등록됨` 확인
+- 운영 Railway에서는 `SCHEDULER_USER_ID`를 제거했다. 기동 시 `스케줄러를 시작하지 않습니다`가 표시되는 상태가 현재 운영 설정이다.
+- 필요할 때 Railway Variables에 Supabase 사용자 UUID를 설정하고 배포한다. 기동 로그에 `매일 00:00 KST 자동 아이디어 생성 스케줄 등록됨`이 표시된다.
+
+### Q. 운영 페이지의 API 요청이 실패한다
+
+1. 브라우저 Network 탭에서 요청이 Railway로 가는지 확인한다. Vercel의 `NEXT_PUBLIC_API_URL`을 변경했다면 Production 재배포가 필요하다.
+2. Railway의 공개 `/health`에서 `200`을 확인한다. 로그인 후 콘텐츠나 리포트 조회가 성공하는지도 확인한다.
+3. 해당 Railway 배포의 **Deploy Logs**에서 `http_request`를 검색한다. `method`, `route`, `status`, `durationMs`로 요청을 찾는다. `304`는 캐시 재사용 응답이다. `/health`와 `OPTIONS`는 이 로그에 기록하지 않는다.
 
 ---
 

@@ -22,7 +22,6 @@
 SUPABASE_URL=
 SUPABASE_SERVICE_KEY=       ← service role key (절대 공개 금지)
 ANTHROPIC_API_KEY=
-SCHEDULER_USER_ID=          ← Supabase user UUID
 PORT=4000
 ```
 
@@ -36,6 +35,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=  ← anon key (공개 가능, RLS로 보호)
 > `SUPABASE_SERVICE_KEY`는 절대 `NEXT_PUBLIC_` 접두사 붙이지 않는다.
 > service role key는 RLS를 우회하므로 서버 측에서만 사용해야 한다.
 
+`SUPABASE_SERVICE_KEY`에는 서버용 `sb_secret_…` 키를 넣는다. Vercel의 브라우저 환경변수에는 Supabase publishable 또는 anon 키만 저장한다.
+
 ---
 
 ## 2. 인증 & 인가
@@ -44,7 +45,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=  ← anon key (공개 가능, RLS로 보호)
 ```javascript
 // 모든 라우트에 requireAuth 미들웨어 필수
 router.get('/items', requireAuth, async (req, res) => {
-  const userId = req.user.sub;  // Supabase user UUID
+  const userId = req.user.id;  // Supabase user UUID
   // ...
 });
 ```
@@ -57,7 +58,7 @@ router.get('/items', requireAuth, async (req, res) => {
 
 ### 체크리스트
 - [ ] 신규 라우트에 `requireAuth` 적용
-- [ ] `req.user.sub`으로 사용자 소유 데이터만 접근
+- [ ] `req.user.id`로 요청 대상과 관련 리소스의 소유권 확인
 - [ ] 다른 사용자의 데이터 접근 차단 확인
 
 ---
@@ -97,6 +98,8 @@ if (!UUID_REGEX.test(req.params.id)) {
 ## 4. XSS 방지
 
 ### 마크다운 렌더링
+
+`MarkdownPreview`는 Marked가 생성한 HTML을 DOMPurify로 정화한다. 파싱 실패 시 원문을 React 텍스트로 표시한다.
 ```tsx
 // ✅ MarkdownPreview 컴포넌트 사용 (sanitization 포함)
 import MarkdownPreview from '@/components/MarkdownPreview';
@@ -147,6 +150,8 @@ Claude 응답에 스크립트 인젝션이 포함될 수 있으므로 항상 `Ma
 
 ## 7. 민감 데이터 로깅 금지
 
+Railway의 `http_request` 로그는 메서드, 라우트 패턴, 상태 코드, 처리 시간을 남긴다. 요청 헤더, 본문, 쿼리 값과 실제 경로 ID는 기록하지 않는다. 화면·로그를 공유할 때 `Authorization`, `Cookie`, 환경변수 값을 가린다.
+
 ```javascript
 // ❌ 절대 금지
 console.log('User data:', req.user);
@@ -163,7 +168,12 @@ console.log('[scheduler] 아이디어 생성 완료:', contentId);
 ## 8. 보안 사고 대응
 
 의심스러운 활동 발견 시:
-1. Railway/Vercel 환경변수에서 즉시 API 키 교체
-2. Supabase Dashboard에서 service role key 재발급
+1. Supabase 또는 Anthropic에서 새 키를 발급하고 사용하는 서비스의 환경변수에 반영
+2. 노출된 키를 공급자 대시보드에서 폐기
 3. `activity_logs` 테이블에서 이상 활동 패턴 확인
 4. Anthropic Console에서 API 사용량 확인
+
+## 9. 남아 있는 보완 항목
+
+- 문서와 연결된 콘텐츠의 소유자가 동일하도록 DB 정책이나 제약을 보강한다.
+- AI 호출에 사용자별 요청 한도와 동시 실행 제한을 둔다.

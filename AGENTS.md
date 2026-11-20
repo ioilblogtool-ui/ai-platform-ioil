@@ -7,7 +7,7 @@
 
 ## 현재 작업 상태
 
-**Phase 5 완료** — 모든 화면 구현 완료.
+**Content Ops Phase 5 완료.** 이후 나만의 AI와 가계부가 추가됐다. 현재 배포 및 실행 방법은 [README](README.md)를 참조한다.
 
 | Phase | 항목 | 상태 |
 |---|---|---|
@@ -24,7 +24,7 @@
 
 현재 남은 미구현 기능은 없음. 아래는 개선/추가 가능한 항목들:
 
-- [ ] Ideas 탭: `content_ideas` 테이블 연동 확인 (현재 activity 로그에서 복원 시도)
+- [ ] Jobs 탭: 실패 작업을 재시도할 때 실제 생성 실행까지 연결
 - [ ] Jobs 탭: WebSocket 실시간 업데이트 (현재 4초 polling)
 - [ ] Settings: API Key 관리, 백엔드 연동 (현재 localStorage 저장)
 - [ ] Contents 탭: 드래그 앤 드롭 칸반 (현재 버튼 클릭 방식)
