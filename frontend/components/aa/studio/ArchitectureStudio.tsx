@@ -1,6 +1,6 @@
 'use client';
 
-// SCR-06 Architecture Studio: Toolbar + Palette + React Flow Canvas + Inspector(읽기 전용 — 속성 편집은 Sprint 3)
+// SCR-06 Architecture Studio: Toolbar + Palette + React Flow Canvas + PropertyInspector
 import '@xyflow/react/dist/style.css';   // D-03: React Flow 기본 CSS만 inline 규칙의 예외
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -12,6 +12,8 @@ import ComponentNode from './ComponentNode';
 import GroupNode from './GroupNode';
 import NoteNode from './NoteNode';
 import RelationEdge from './RelationEdge';
+import PropertyInspector from './PropertyInspector';
+import type { InspectorEdits } from './SchemaForm';
 import { CATEGORY_COLOR, DND_MIME, paletteItems, type PaletteItem } from './palette-meta';
 
 // React Flow가 렌더마다 새로 만들지 않도록 컴포넌트 밖에 둔다
@@ -34,6 +36,31 @@ const SAVE_LABEL: Record<SaveState, { text: string; color: string }> = {
 const isEditable = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
 
+function createInspectorEdits(): InspectorEdits & { clear: () => void; hasPending: () => boolean } {
+  const pending = new Map<string, { apply: () => void; timer: ReturnType<typeof setTimeout> }>();
+  const take = (id: string) => {
+    const entry = pending.get(id);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    pending.delete(id);
+    return entry.apply;
+  };
+  return {
+    queue(id, apply) {
+      take(id);
+      if (apply) pending.set(id, { apply, timer: setTimeout(() => take(id)?.(), 300) });
+    },
+    flush(id) {
+      if (id !== undefined) take(id)?.();
+      else for (const key of Array.from(pending.keys())) take(key)?.();
+    },
+    clear() {
+      for (const key of pending.keys()) take(key);
+    },
+    hasPending: () => pending.size > 0,
+  };
+}
+
 export default function ArchitectureStudio({ projectId }: { projectId: string }) {
   return (
     <ReactFlowProvider>
@@ -51,14 +78,29 @@ function Studio({ projectId }: { projectId: string }) {
   const [paletteOpen, setPaletteOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
 
-  useEffect(() => { s.load(projectId); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const edits = useMemo(() => createInspectorEdits(), [projectId]);
+  useEffect(() => {
+    useStudio.getState().load(projectId);
+    return () => {
+      edits.flush();
+      edits.clear();
+      useStudio.getState().leave();
+    };
+  }, [projectId, edits]);
+  useEffect(() => { edits.flush(); }, [s.selectedNodeIds, s.selectedEdgeIds, edits]);
+
+  const saveWithInspector = useCallback(() => {
+    edits.flush();
+    const current = useStudio.getState();
+    if (current.saveState !== 'conflict') void current.save();
+  }, [edits]);
 
   // 단축키 (04 §6.10). 입력 중(note·그룹 라벨·검색)에는 Ctrl+S 말고는 무시
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const st = useStudio.getState();
       const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); st.save(); return; }
+      if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); saveWithInspector(); return; }
       if (st.pendingDelete) { if (e.key === 'Escape') st.cancelDelete(); return; }
       if (isEditable(e.target)) return;
       if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); st.duplicateSelection(); return; }
@@ -71,17 +113,17 @@ function Studio({ projectId }: { projectId: string }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [fitView]);
+  }, [fitView, saveWithInspector]);
 
   // 저장 안 한 변경이 있으면 이탈 경고
   useEffect(() => {
     const onBefore = (e: BeforeUnloadEvent) => {
       const st = useStudio.getState().saveState;
-      if (st === 'dirty' || st === 'saving' || st === 'conflict') { e.preventDefault(); e.returnValue = ''; }
+      if (edits.hasPending() || st === 'dirty' || st === 'saving' || st === 'conflict' || (st === 'error' && useStudio.getState().model)) { e.preventDefault(); e.returnValue = ''; }
     };
     window.addEventListener('beforeunload', onBefore);
     return () => window.removeEventListener('beforeunload', onBefore);
-  }, []);
+  }, [edits]);
 
   const view = s.model?.views.find((v) => v.id === s.viewId);
   const selected = useMemo(() => new Set(s.selectedNodeIds), [s.selectedNodeIds]);
@@ -137,7 +179,6 @@ function Studio({ projectId }: { projectId: string }) {
   }
 
   const label = SAVE_LABEL[s.saveState];
-  const componentCount = view?.nodes.filter((n) => n.kind === 'component').length ?? 0;
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#080809', color: 'rgba(255,255,255,0.9)', fontFamily: 'system-ui, -apple-system, sans-serif', fontSize: 13 }}>
@@ -152,20 +193,40 @@ function Studio({ projectId }: { projectId: string }) {
         <span data-testid="aa-save-state" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: label.color }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: label.color }} />{label.text}
         </span>
-        {s.saveMessage && s.saveState !== 'conflict' && <span data-testid="aa-save-message" style={{ fontSize: 12, color: s.saveState === 'error' ? '#e5484d' : 'rgba(255,255,255,0.45)' }}>{s.saveMessage}</span>}
-        <button onClick={() => s.save()} disabled={s.saveState === 'saving' || s.saveState === 'loading' || s.saveState === 'conflict'}
+        {s.saveMessage && s.saveState !== 'conflict' && <span data-testid="aa-save-message" role={s.saveState === 'error' ? 'alert' : undefined} style={{ fontSize: 12, color: s.saveState === 'error' ? '#e5484d' : 'rgba(255,255,255,0.45)' }}>{s.saveMessage}</span>}
+        <button onClick={saveWithInspector} disabled={Boolean(s.recovery) || s.saveState === 'saving' || s.saveState === 'loading' || s.saveState === 'conflict'}
           title="저장 (Ctrl+S)" style={{ ...btn(), background: '#c8a96e', color: '#16130c', fontWeight: 600, borderColor: '#c8a96e', opacity: s.saveState === 'dirty' || s.saveState === 'error' ? 1 : 0.55 }}>
-          저장
+          {s.saveState === 'error' ? '저장 재시도' : '저장'}
         </button>
         <button onClick={() => setInspectorOpen((v) => !v)} title="Inspector 접기·펴기 (])" style={btn(true)}>◧</button>
       </div>
 
-      {/* 충돌 안내 (Sprint 1 최소판 — 모달·덮어쓰기 선택은 Sprint 3) */}
+      {s.backupMessage && <div role="status" style={{ padding: '6px 14px', color: '#f3c97a' }}>{s.backupMessage}</div>}
+      {s.recovery && (
+        <div role="dialog" aria-label="미저장 편집 복구" style={{ padding: '8px 14px', color: '#f3c97a' }}>
+          {s.recovery.value.revision < s.baseRevision ? '서버에 더 새 버전이 있습니다. ' : ''}
+          브라우저에 저장되지 않은 편집이 남아 있습니다.
+          <button style={btn()} onClick={s.recover}>편집 복구</button>
+          <button style={btn()} onClick={s.discardRecovery}>복구본 삭제</button>
+        </div>
+      )}
       {s.saveState === 'conflict' && (
-        <div role="alert" style={{ padding: '8px 14px', background: 'rgba(245,165,36,0.1)', borderBottom: '1px solid rgba(245,165,36,0.3)', color: '#f3c97a', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 10 }}>
-          ⚠ 다른 곳에서 더 최근에 저장되었습니다 (rev {s.conflictRevision}). 지금 변경은 저장되지 않았어요.
+        <div role="dialog" aria-label="저장 충돌" style={{ padding: '8px 14px', background: 'rgba(245,165,36,0.1)', borderBottom: '1px solid rgba(245,165,36,0.3)', color: '#f3c97a', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 10 }}>
+          서버에 더 최근 설계가 있습니다 (rev {s.conflictRevision}). 내 편집은 유지됩니다.
+          {s.saveMessage && <span role="status">{s.saveMessage}</span>}
           <span style={{ flex: 1 }} />
-          <button style={btn()} onClick={() => { if (confirm('저장하지 않은 변경을 버리고 서버 버전을 불러올까요?')) s.load(projectId); }}>서버 버전 불러오기</button>
+          <button style={btn()} disabled={s.reloading} onClick={() => {
+            if (confirm('저장하지 않은 변경을 버리고 서버 버전을 불러올까요?')) {
+              edits.clear();
+              void s.reloadServer();
+            }
+          }}>서버 버전 불러오기</button>
+          <button style={btn()} disabled={s.reloading || !Number.isInteger(s.conflictRevision)} onClick={() => {
+            if (confirm(`서버 rev ${s.conflictRevision}을 내 편집으로 덮어쓸까요?`)) {
+              edits.flush();
+              void s.overwrite();
+            }
+          }}>내 변경으로 덮어쓰기</button>
         </div>
       )}
 
@@ -241,95 +302,10 @@ function Studio({ projectId }: { projectId: string }) {
           )}
         </div>
 
-        {inspectorOpen && <Inspector componentCount={componentCount} />}
+        {inspectorOpen && <PropertyInspector edits={edits} />}
       </div>
 
       {s.pendingDelete && <DeleteDialog />}
-    </div>
-  );
-}
-
-/** Inspector (읽기 전용 — 이름·속성 편집은 Sprint 3): 선택 없음 / 노드 / 엣지 / n개 선택됨 */
-function Inspector({ componentCount }: { componentCount: number }) {
-  const s = useStudio();
-  const view = s.model?.views.find((v) => v.id === s.viewId);
-  const total = s.selectedNodeIds.length + s.selectedEdgeIds.length;
-  const node = s.selectedNodeIds.length === 1 && !s.selectedEdgeIds.length ? view?.nodes.find((n) => n.id === s.selectedNodeIds[0]) : undefined;
-  const edge = s.selectedEdgeIds.length === 1 && !s.selectedNodeIds.length ? view?.edges.find((e) => e.id === s.selectedEdgeIds[0]) : undefined;
-  const component = node?.componentId ? s.model?.components[node.componentId] : undefined;
-  const relation = edge ? s.model?.relations[edge.relationId] : undefined;
-  const muted: React.CSSProperties = { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 4 };
-  const mono: React.CSSProperties = { fontFamily: 'Consolas, monospace', fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 6 };
-
-  const actions = total > 0 && (
-    <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
-      {s.selectedNodeIds.length > 0 && <button style={btn()} onClick={() => s.duplicateSelection()} title="Ctrl+D">복제</button>}
-      <button style={{ ...btn(), color: '#ff8a8d', borderColor: 'rgba(229,72,77,0.35)' }} onClick={() => s.requestDelete()} title="Delete">삭제</button>
-    </div>
-  );
-
-  let body: React.ReactNode;
-  if (total > 1) {
-    body = (
-      <>
-        <div style={{ fontWeight: 600 }} data-testid="aa-inspector-multi">{total}개 선택됨</div>
-        <div style={muted}>노드 {s.selectedNodeIds.length} · 연결 {s.selectedEdgeIds.length}</div>
-      </>
-    );
-  } else if (component && node) {
-    body = (
-      <>
-        <div style={{ fontWeight: 600 }}>{component.name}</div>
-        <div style={muted}>{s.registry?.types[component.type]?.label ?? component.type}</div>
-        <div style={mono}>{component.id}</div>
-        <div style={{ ...muted, marginTop: 16, lineHeight: 1.6 }}>
-          위치 ({node.position.x}, {node.position.y}){node.parentId ? ' · 그룹 안 상대 좌표' : ''}<br />
-          이름·기술·속성 편집은 Sprint 3에서 추가됩니다.
-        </div>
-      </>
-    );
-  } else if (node?.kind === 'group') {
-    const children = view?.nodes.filter((n) => n.parentId === node.id).length ?? 0;
-    body = (
-      <>
-        <div style={{ fontWeight: 600 }}>{node.label || 'Boundary'}</div>
-        <div style={muted}>Boundary · 안에 {children}개</div>
-        <div style={{ ...muted, marginTop: 16, lineHeight: 1.6 }}>크기 {node.width}×{node.height}<br />라벨을 더블클릭해서 이름을 바꿉니다.</div>
-      </>
-    );
-  } else if (node?.kind === 'note') {
-    body = (
-      <>
-        <div style={{ fontWeight: 600 }}>Note</div>
-        <div style={muted}>{node.text?.length ?? 0} / 2,000자 · 더블클릭해서 편집</div>
-      </>
-    );
-  } else if (relation) {
-    const from = s.model?.components[relation.from]?.name ?? relation.from;
-    const to = s.model?.components[relation.to]?.name ?? relation.to;
-    body = (
-      <>
-        <div style={{ fontWeight: 600 }}>{from} → {to}</div>
-        <div style={muted}>{relation.type} · {relation.protocol ?? '—'} · {relation.mode ?? 'sync'}</div>
-        <div style={mono}>{relation.id}</div>
-      </>
-    );
-  } else {
-    body = (
-      <>
-        <div style={{ fontWeight: 600 }}>Logical View</div>
-        <div style={{ marginTop: 10, fontSize: 12, color: 'rgba(255,255,255,0.55)', lineHeight: 1.9 }}>
-          컴포넌트 {componentCount} · 관계 {view?.edges.length ?? 0}<br />
-          Draft rev {s.baseRevision || '–'}
-        </div>
-      </>
-    );
-  }
-
-  return (
-    <div style={{ width: 320, flexShrink: 0, borderLeft: '1px solid rgba(255,255,255,0.07)', background: '#0a0a0c', padding: 16, overflowY: 'auto' }} data-testid="aa-inspector">
-      {body}
-      {actions}
     </div>
   );
 }

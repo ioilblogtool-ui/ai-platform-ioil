@@ -2,7 +2,7 @@
 // 모든 함수는 입력 모델을 바꾸지 않고 새 모델을 돌려준다. 바꿀 것이 없거나 거부되면 입력 모델을 그대로 돌려준다.
 //
 // 좌표 기준: parentId가 있으면 position은 부모 그룹 좌상단 기준 상대 좌표, 없으면 캔버스 절대 좌표 (React Flow sub-flow와 같음).
-import type { ArchitectureModel, Component, Relation, TypeRegistry, View, ViewNode } from './architecture-types';
+import type { ArchitectureModel, Component, PropertyDef, Relation, TypeRegistry, View, ViewNode } from './architecture-types';
 
 export type NewId = (prefix: 'cmp' | 'rel' | 'nd' | 'ed' | 'view') => string;
 export type Point = { x: number; y: number };
@@ -16,6 +16,110 @@ const round = (p: Point): Point => ({ x: Math.round(p.x), y: Math.round(p.y) });
 
 export function cloneModel(model: ArchitectureModel): ArchitectureModel {
   return structuredClone(model);
+}
+
+export const DESCRIPTION_MAX_BYTES = 16 * 1024;
+export const PROTOCOLS = ['HTTP', 'HTTPS', 'gRPC', 'TCP', 'AMQP', 'Kafka', 'JDBC', 'RESP', 'Other'] as const;
+export const RELATION_MODES = ['sync', 'async'] as const;
+
+export function parsePropertyInput(def: PropertyDef, raw: string): { value?: unknown; error?: string } {
+  if (raw === '') return {};
+  switch (def.type) {
+    case 'number': {
+      const value = Number(raw);
+      if (!raw.trim() || !Number.isFinite(value)) return { error: '숫자를 입력하세요.' };
+      if (def.integer && !Number.isInteger(value)) return { error: '정수를 입력하세요.' };
+      if (def.min !== undefined && value < def.min) return { error: `${def.min} 이상이어야 합니다.` };
+      if (def.max !== undefined && value > def.max) return { error: `${def.max} 이하여야 합니다.` };
+      return { value };
+    }
+    case 'boolean':
+      return raw === 'true' || raw === 'false' ? { value: raw === 'true' } : { error: '참 또는 거짓을 선택하세요.' };
+    case 'enum':
+      return def.options?.includes(raw) ? { value: raw } : { error: '목록에서 값을 선택하세요.' };
+    case 'list': {
+      const value = raw.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+      return value.length > 50 || value.some((item) => item.length > 200)
+        ? { error: '200자 이하 항목을 최대 50개 입력하세요.' }
+        : { value: value.length ? value : undefined };
+    }
+    case 'string':
+    case 'text': {
+      const limit = def.type === 'string' ? 500 : 5000;
+      if (raw.length > limit) return { error: `${limit}자 이하여야 합니다.` };
+      if (def.type === 'string' && def.pattern && !new RegExp(def.pattern).test(raw)) return { error: '형식이 맞지 않습니다.' };
+      return { value: raw };
+    }
+  }
+}
+
+export function componentTextError(field: 'name' | 'technology' | 'description', value: string): string | undefined {
+  if (field === 'name' && (!value.trim() || value.length > 120)) return '이름은 1~120자여야 합니다.';
+  if (field === 'technology' && value.length > 500) return '기술은 500자 이하여야 합니다.';
+  if (field === 'description' && new TextEncoder().encode(value).length > DESCRIPTION_MAX_BYTES) return '설명은 UTF-8 기준 16KiB 이하여야 합니다.';
+}
+
+export function customKeyError(defs: PropertyDef[], key: string, custom: Record<string, string>, previous?: string): string | undefined {
+  if (!key || key.length > 120) return '키는 1~120자여야 합니다.';
+  if (defs.some((def) => def.key === key)) return '등록된 속성 키와 같은 이름은 사용할 수 없습니다.';
+  if (key !== previous && Object.hasOwn(custom, key)) return '이미 있는 키입니다.';
+}
+
+export function updateComponentText(model: ArchitectureModel, id: string, field: 'name' | 'technology' | 'description', value: string): ArchitectureModel {
+  const component = model.components[id];
+  if (!component || componentTextError(field, value) || (component[field] ?? '') === value) return model;
+  const updated = { ...component };
+  if (!value && field !== 'name') delete updated[field];
+  else updated[field] = value;
+  return { ...model, components: { ...model.components, [id]: updated } };
+}
+
+export function updateComponentProperty(model: ArchitectureModel, registry: TypeRegistry | null, id: string, key: string, raw: string): ArchitectureModel {
+  const component = model.components[id];
+  const def = registry?.types[component?.type]?.properties?.find((property) => property.key === key);
+  if (!component || !def) return model;
+  const { value, error } = parsePropertyInput(def, raw);
+  const previous = component.properties?.[key];
+  if (error || previous === value || (Array.isArray(previous) && Array.isArray(value) && previous.length === value.length && previous.every((entry, index) => entry === value[index]))) return model;
+  const properties = { ...component.properties };
+  if (value === undefined) delete properties[key];
+  else properties[key] = value;
+  return { ...model, components: { ...model.components, [id]: { ...component, properties } } };
+}
+
+export function updateCustomProperty(model: ArchitectureModel, registry: TypeRegistry | null, id: string, previous: string | undefined, key: string, value?: string): ArchitectureModel {
+  const component = model.components[id];
+  if (!component) return model;
+  const custom = component.custom ?? {};
+  if (previous !== undefined && !Object.hasOwn(custom, previous)) return model;
+  if (value === undefined) {
+    if (previous === undefined) return model;
+  } else {
+    const defs = registry?.types[component.type]?.properties;
+    if (!defs || customKeyError(defs, key, custom, previous) || value.length > 500 || (previous === key && custom[key] === value)) return model;
+  }
+  const updated = { ...custom };
+  if (previous !== undefined) delete updated[previous];
+  const next = value === undefined ? updated : { ...updated, [key]: value };
+  const nextComponent = { ...component };
+  if (Object.keys(next).length) nextComponent.custom = next;
+  else delete nextComponent.custom;
+  return { ...model, components: { ...model.components, [id]: nextComponent } };
+}
+
+export function relationFieldError(field: 'protocol' | 'mode' | 'label', value: string): string | undefined {
+  if (!value) return;
+  if (field === 'protocol' && !PROTOCOLS.some((entry) => entry === value)) return '지원하지 않는 프로토콜입니다.';
+  if (field === 'mode' && !RELATION_MODES.some((entry) => entry === value)) return '동기 또는 비동기를 선택하세요.';
+  if (field === 'label' && value.length > 500) return '라벨은 500자 이하여야 합니다.';
+}
+
+export function updateRelationField(model: ArchitectureModel, id: string, field: 'protocol' | 'mode' | 'label', value: string): ArchitectureModel {
+  const relation = model.relations[id];
+  if (!relation || relation.type !== 'calls' || relationFieldError(field, value) || (relation[field] ?? '') === value) return model;
+  const updated: Relation = { ...relation, [field]: value };
+  if (!value) delete updated[field];
+  return { ...model, relations: { ...model.relations, [id]: updated } };
 }
 
 export function getView(model: ArchitectureModel, viewId: string): View | undefined {

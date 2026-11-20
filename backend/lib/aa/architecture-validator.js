@@ -114,8 +114,14 @@ function validateModel(model) {
         err('V6', `${p}.type`, `${c.type}은(는) 컴포넌트가 아니라 ${def.nodeKind} 노드입니다.`);
       } else {
         if (c.layer !== def.layer) err('V6', `${p}.layer`, `${c.type}의 layer는 ${def.layer}여야 합니다.`);
+        const schema = new Map(def.properties.map((d) => [d.key, d]));
+        if (isObj(c.custom)) {
+          for (const key of Object.keys(c.custom)) {
+            if (scanForSecrets(key).length) err('V12', `${p}.custom`, '자유 속성 키에 민감정보로 보이는 값이 있습니다.');
+            if (schema.has(key)) err('V6', `${p}.custom.${key}`, '등록된 속성 키와 같은 이름은 사용할 수 없습니다.');
+          }
+        }
         if (isObj(c.properties)) {
-          const schema = new Map(def.properties.map((d) => [d.key, d]));
           for (const [key, value] of Object.entries(c.properties)) {
             const pd = schema.get(key);
             if (!pd) { err('V6', `${p}.properties.${key}`, `${c.type}에 없는 속성입니다: ${key} (자유 속성은 custom에 넣으세요)`); continue; }
@@ -216,7 +222,8 @@ function validateModel(model) {
 
   // V12: 키·토큰·PEM이 들어 있으면 저장 거부
   for (const hit of scanForSecrets(model)) {
-    err('V12', hit.path, `민감정보로 보이는 값이 있어 저장할 수 없습니다 (${hit.rule}: ${hit.sample}).`);
+    const path = hit.path.replace(/^(components\.[^.]+\.custom)(?:\..*)?$/, '$1');
+    err('V12', path, `민감정보로 보이는 값이 있어 저장할 수 없습니다 (${hit.rule}: ${hit.sample}).`);
   }
 
   return { errors, warnings, tooLarge: null };

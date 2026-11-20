@@ -1,7 +1,7 @@
 'use client';
 
 // Architecture Studio 상태 (D-05 Zustand). 도메인 모델이 진실의 원천이다 (02 §3.1, §5).
-// 모델 변경은 전부 model-ops 순수 함수로 한다. 저장은 수동(버튼·Ctrl+S) — 2초 자동 저장과 충돌 모달은 Sprint 3.
+// 모델 변경은 model-ops를 사용한다. 자동 저장과 수동 저장은 같은 revision 경로를 거친다.
 import { create } from 'zustand';
 import type { Connection, EdgeChange, NodeChange } from '@xyflow/react';
 import type { ArchitectureModel, TypeRegistry } from './architecture-types';
@@ -9,6 +9,9 @@ import { getAaProject, getDraft, getTypeRegistry, saveDraft, AaApiError, Revisio
 import { newId } from './ids';
 import type { AaFlowNode } from './graph-mapper';
 import * as ops from './model-ops';
+import { createClient } from '../supabase';
+import { createAutosave } from './autosave';
+import { readDraftBackup, removeDraftBackup, writeDraftBackup } from './draft-backup';
 
 export type SaveState = 'loading' | 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
 type Point = { x: number; y: number };
@@ -32,7 +35,15 @@ type StudioState = {
   pendingDelete: PendingDelete | null;
   loadError: string | null;
 
+  backupMessage: string | null;
+  recovery: ReturnType<typeof readDraftBackup>;
+  reloading: boolean;
   load: (projectId: string) => Promise<void>;
+  leave: () => void;
+  recover: () => void;
+  discardRecovery: () => void;
+  reloadServer: () => Promise<void>;
+  overwrite: () => Promise<void>;
   addComponent: (type: string, position: Point) => void;
   addGroup: (position: Point) => void;
   addNote: (position: Point) => void;
@@ -48,6 +59,10 @@ type StudioState = {
   duplicateSelection: () => void;
   updateNoteText: (nodeId: string, text: string) => void;
   updateGroupLabel: (nodeId: string, label: string) => void;
+  updateComponentText: (id: string, field: 'name' | 'technology' | 'description', value: string) => void;
+  updateComponentProperty: (id: string, key: string, raw: string) => void;
+  updateCustomProperty: (id: string, previous: string | undefined, key: string, value?: string) => void;
+  updateRelationField: (id: string, field: 'protocol' | 'mode' | 'label', value: string) => void;
   clearSelection: () => void;
   save: () => Promise<void>;
 };
@@ -55,27 +70,133 @@ type StudioState = {
 export const useStudio = create<StudioState>((set, get) => {
   const dirtyState = (s: SaveState): SaveState => (s === 'saving' || s === 'conflict' ? s : 'dirty');
 
+  const inFlight = new Map<string, ReturnType<typeof saveDraft>>();
+  let session = 0;
+  let backupKey: string | null = null;
+  let ownedBackup: string | null = null;
+  let tab: string | undefined;
+  let pausedForAuth = false;
+  let retryUsed = false;
+  let committedModel: ArchitectureModel | null = null;
+  const autosave = createAutosave(() => { void persist(); });
+
+  const clearBackup = (raw = ownedBackup) => {
+    if (!backupKey) return;
+    try {
+      removeDraftBackup(backupKey, raw);
+      if (raw === ownedBackup) ownedBackup = null;
+    } catch {
+      set({ backupMessage: '브라우저 복구본을 정리하지 못했습니다.' });
+    }
+  };
+
+  const backup = () => {
+    const { baseRevision, recovery } = get();
+    if (!backupKey || !committedModel || recovery) return;
+    try {
+      tab ??= crypto.randomUUID();
+      const raw = writeDraftBackup(backupKey, {
+        model: committedModel, revision: baseRevision, editedAt: Date.now(), tab,
+      });
+      if (!raw) {
+        clearBackup();
+        set({ backupMessage: '민감정보가 포함된 변경은 브라우저에 백업하지 않았습니다.' });
+        return;
+      }
+      ownedBackup = raw;
+      set({ backupMessage: null });
+    } catch {
+      set({ backupMessage: '브라우저에 미저장 변경을 백업하지 못했습니다.' });
+    }
+  };
+
+  const commitEdit = () => {
+    const { editSeq, model, saveState, recovery } = get();
+    committedModel = model;
+    set({ editSeq: editSeq + 1, saveState: dirtyState(saveState) });
+    backup();
+    if (!pausedForAuth && !recovery && saveState !== 'saving' && saveState !== 'conflict') {
+      retryUsed = false;
+      autosave.queue();
+    }
+  };
+
+  async function persist(confirmedRevision?: number) {
+    const { projectId, baseRevision, saveState, editSeq, recovery, reloading } = get();
+    if (!projectId || !committedModel || recovery || reloading || saveState === 'saving' ||
+        saveState === 'loading' || saveState === 'saved' || pausedForAuth ||
+        (saveState === 'conflict' && confirmedRevision === undefined)) return;
+    const currentSession = session;
+    const model = committedModel;
+    autosave.stop();
+    set({ saveState: 'saving', saveMessage: null });
+    const request = saveDraft(projectId, confirmedRevision ?? baseRevision, model);
+    inFlight.set(projectId, request);
+    try {
+      const res = await request;
+      if (session !== currentSession) return;
+      const edited = get().editSeq !== editSeq;
+      retryUsed = false;
+      set({
+        baseRevision: res.revision,
+        conflictRevision: null,
+        saveState: edited ? 'dirty' : 'saved',
+        saveMessage: res.warnings.length ? `경고 ${res.warnings.length}건` : null,
+      });
+      if (edited) {
+        backup();
+        autosave.queue();
+      } else {
+        clearBackup();
+      }
+    } catch (error) {
+      if (session !== currentSession) return;
+      if (error instanceof RevisionConflictError) {
+        set({ saveState: 'conflict', conflictRevision: error.currentRevision, saveMessage: error.message });
+        return;
+      }
+      const apiError = error instanceof AaApiError ? error : null;
+      pausedForAuth = apiError?.status === 401;
+      const issues = apiError && Array.isArray(apiError.details) ? apiError.details : [];
+      const sensitive = issues.find((issue) => issue?.rule === 'V12' && typeof issue.path === 'string');
+      let message = (error as Error).message;
+      if (pausedForAuth) message = '다시 로그인한 뒤 저장을 재시도하세요.';
+      else if (sensitive) message = `민감정보로 보이는 값이 있어 저장할 수 없습니다. (${sensitive.path})`;
+      else if (apiError?.code === 'MODEL_TOO_LARGE') message = '설계가 너무 큽니다 (최대 1MB)';
+      if (sensitive) clearBackup();
+      // A failed confirmed overwrite must stay in conflict. A manual retry requires confirmation again.
+      set({ saveState: confirmedRevision === undefined ? 'error' : 'conflict', saveMessage: message });
+      if (confirmedRevision === undefined && !retryUsed && apiError && (apiError.status === 0 || apiError.status >= 500)) {
+        retryUsed = true;
+        autosave.queue(5000);
+      }
+    } finally {
+      if (inFlight.get(projectId) === request) inFlight.delete(projectId);
+    }
+  }
+
   // 모델을 바꾸는 공통 경로: model-ops가 새 모델을 돌려준다. 같은 객체면 변경 없음 → dirty 아님
   const edit = (fn: (m: ArchitectureModel, viewId: string) => ArchitectureModel) => {
-    const { model, saveState, viewId } = get();
-    if (!model) return false;
+    const { model, viewId, recovery, reloading } = get();
+    if (!model || recovery || reloading) return false;
     const next = fn(model, viewId);
     if (next === model) return false;
-    set({ model: next, editSeq: get().editSeq + 1, saveState: dirtyState(saveState) });
+    set({ model: next });
+    commitEdit();
     return true;
   };
 
   // 드래그·크기 조절 중에는 화면에만 반영하고 편집으로 세지 않는다. 끝났을 때 그동안 바뀌었는지로 dirty를 정한다
   let changedDuringGesture = false;
   const preview = (fn: (m: ArchitectureModel, viewId: string) => ArchitectureModel) => {
-    const { model, viewId } = get();
-    if (!model) return;
+    const { model, viewId, recovery, reloading } = get();
+    if (!model || recovery || reloading) return;
     const next = fn(model, viewId);
     if (next !== model) { changedDuringGesture = true; set({ model: next }); }
   };
   const commitGesture = (fn: (m: ArchitectureModel, viewId: string) => ArchitectureModel) => {
     const changed = edit(fn);
-    if (!changed && changedDuringGesture) set({ editSeq: get().editSeq + 1, saveState: dirtyState(get().saveState) });
+    if (!changed && changedDuringGesture && !get().reloading && !get().recovery) commitEdit();
     changedDuringGesture = false;
   };
 
@@ -115,16 +236,110 @@ export const useStudio = create<StudioState>((set, get) => {
     pendingDelete: null,
     loadError: null,
 
+    backupMessage: null,
+    recovery: null,
+    reloading: false,
+
+    leave() {
+      session++;
+      autosave.stop();
+    },
+
     async load(projectId) {
+      get().leave();
+      const currentSession = session;
       changedDuringGesture = false;
-      set({ projectId, saveState: 'loading', loadError: null, model: null, selectedNodeIds: [], selectedEdgeIds: [], pendingDelete: null, conflictRevision: null, saveMessage: null });
+      pausedForAuth = false;
+      retryUsed = false;
+      backupKey = null;
+      ownedBackup = null;
+      committedModel = null;
+      set({
+        projectId, saveState: 'loading', loadError: null, model: null,
+        selectedNodeIds: [], selectedEdgeIds: [], pendingDelete: null,
+        conflictRevision: null, saveMessage: null, backupMessage: null, recovery: null, reloading: false,
+      });
       try {
-        const [project, draft, registry] = await Promise.all([getAaProject(projectId), getDraft(projectId), getTypeRegistry()]);
-        set({ projectName: project.name, model: draft.model, baseRevision: draft.revision, registry, saveState: 'saved', editSeq: 0 });
-      } catch (e) {
-        const msg = e instanceof AaApiError && e.code === 'NOT_FOUND' ? '프로젝트를 찾을 수 없습니다.' : (e as Error).message;
-        set({ loadError: msg, saveState: 'error' });
+        await inFlight.get(projectId)?.catch(() => undefined);
+        if (session !== currentSession) return;
+        const auth = createClient().auth;
+        const initial = await auth.getSession();
+        const [project, draft, registry] = await Promise.all([
+          getAaProject(projectId), getDraft(projectId), getTypeRegistry(),
+        ]);
+        const current = await auth.getSession();
+        if (session !== currentSession) return;
+        const userId = initial.data.session?.user.id;
+        backupKey = userId && userId === current.data.session?.user.id ? `aa:draft:${userId}:${projectId}` : null;
+        let recovery = null;
+        let backupMessage = null;
+        try {
+          if (backupKey) recovery = readDraftBackup(backupKey, draft.revision, draft.updatedAt);
+        } catch {
+          backupMessage = '브라우저 복구본을 읽지 못했습니다.';
+        }
+        committedModel = draft.model;
+        set({
+          projectName: project.name, model: draft.model, baseRevision: draft.revision,
+          registry, saveState: 'saved', editSeq: 0, recovery, backupMessage,
+        });
+      } catch (error) {
+        if (session !== currentSession) return;
+        const message = error instanceof AaApiError && error.code === 'NOT_FOUND'
+          ? '프로젝트를 찾을 수 없습니다.' : (error as Error).message;
+        set({ loadError: message, saveState: 'error' });
       }
+    },
+
+    recover() {
+      const { recovery, baseRevision } = get();
+      if (!recovery) return;
+      ownedBackup = recovery.raw;
+      const older = recovery.value.revision < baseRevision;
+      set({
+        model: recovery.value.model,
+        recovery: null,
+        saveState: older ? 'conflict' : 'dirty',
+        conflictRevision: older ? baseRevision : null,
+      });
+      commitEdit();
+    },
+
+    discardRecovery() {
+      const { recovery } = get();
+      if (!recovery) return;
+      clearBackup(recovery.raw);
+      set({ recovery: null });
+    },
+
+    async reloadServer() {
+      const { projectId, saveState, reloading } = get();
+      if (!projectId || saveState !== 'conflict' || reloading) return;
+      const currentSession = session;
+      set({ reloading: true, saveMessage: null });
+      try {
+        const draft = await getDraft(projectId);
+        if (session !== currentSession) return;
+        clearBackup();
+        committedModel = draft.model;
+        changedDuringGesture = false;
+        pausedForAuth = false;
+        set({
+          model: draft.model, baseRevision: draft.revision, saveState: 'saved',
+          conflictRevision: null, reloading: false, selectedNodeIds: [], selectedEdgeIds: [],
+          pendingDelete: null, editSeq: 0,
+        });
+      } catch (error) {
+        if (session !== currentSession) return;
+        set({ reloading: false, saveMessage: (error as Error).message });
+      }
+    },
+
+    async overwrite() {
+      const { conflictRevision, saveState } = get();
+      if (saveState !== 'conflict' || !Number.isInteger(conflictRevision)) return;
+      pausedForAuth = false;
+      await persist(conflictRevision);
     },
 
     addComponent(type, position) {
@@ -254,30 +469,31 @@ export const useStudio = create<StudioState>((set, get) => {
       edit((m, vid) => ops.updateGroupLabel(m, vid, nodeId, label));
     },
 
+    updateComponentText(id, field, value) {
+      edit((m) => ops.updateComponentText(m, id, field, value));
+    },
+
+    updateComponentProperty(id, key, raw) {
+      edit((m) => ops.updateComponentProperty(m, get().registry, id, key, raw));
+    },
+
+    updateCustomProperty(id, previous, key, value) {
+      edit((m) => ops.updateCustomProperty(m, get().registry, id, previous, key, value));
+    },
+
+    updateRelationField(id, field, value) {
+      edit((m) => ops.updateRelationField(m, id, field, value));
+    },
+
     clearSelection() {
       set({ selectedNodeIds: [], selectedEdgeIds: [] });
     },
 
     async save() {
-      const { projectId, model, baseRevision, saveState, editSeq } = get();
-      if (!projectId || !model || saveState === 'saving' || saveState === 'loading') return;
-      set({ saveState: 'saving', saveMessage: null });
-      try {
-        const res = await saveDraft(projectId, baseRevision, model);
-        const changedWhileSaving = get().editSeq !== editSeq;
-        set({
-          baseRevision: res.revision,
-          saveState: changedWhileSaving ? 'dirty' : 'saved',
-          saveMessage: res.warnings.length ? `경고 ${res.warnings.length}건` : null,
-        });
-      } catch (e) {
-        if (e instanceof RevisionConflictError) {
-          set({ saveState: 'conflict', conflictRevision: e.currentRevision, saveMessage: e.message });
-        } else {
-          const msg = e instanceof AaApiError && e.code === 'MODEL_TOO_LARGE' ? '설계가 너무 큽니다 (최대 1MB)' : (e as Error).message;
-          set({ saveState: 'error', saveMessage: msg });
-        }
-      }
+      if (get().saveState === 'saving') return;
+      pausedForAuth = false;
+      retryUsed = false;
+      await persist();
     },
   };
 });
