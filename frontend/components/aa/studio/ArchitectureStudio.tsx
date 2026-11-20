@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, useReactFlow, type Node } from '@xyflow/react';
 import { useStudio, type SaveState } from '@/lib/aa/studio-store';
 import { toFlow } from '@/lib/aa/graph-mapper';
+import { shouldWarnOnLeave } from '@/lib/aa/autosave';
 import { modelByteSize } from '@/lib/aa/architecture-api';
 import ComponentNode from './ComponentNode';
 import GroupNode from './GroupNode';
@@ -118,8 +119,8 @@ function Studio({ projectId }: { projectId: string }) {
   // 저장 안 한 변경이 있으면 이탈 경고
   useEffect(() => {
     const onBefore = (e: BeforeUnloadEvent) => {
-      const st = useStudio.getState().saveState;
-      if (edits.hasPending() || st === 'dirty' || st === 'saving' || st === 'conflict' || (st === 'error' && useStudio.getState().model)) { e.preventDefault(); e.returnValue = ''; }
+      const st = useStudio.getState();
+      if (shouldWarnOnLeave(st.saveState, Boolean(st.model), edits.hasPending())) { e.preventDefault(); e.returnValue = ''; }
     };
     window.addEventListener('beforeunload', onBefore);
     return () => window.removeEventListener('beforeunload', onBefore);

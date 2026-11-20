@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createAutosave } from '../../lib/aa/autosave.ts';
+import { createAutosave, shouldWarnOnLeave } from '../../lib/aa/autosave.ts';
 import { readDraftBackup, removeDraftBackup, writeDraftBackup } from '../../lib/aa/draft-backup.ts';
 
 test('debounces edits, supports a retry delay, and cancels on leave', (t) => {
@@ -52,4 +52,63 @@ test('protects recovery ownership, revision, and credentials', (t) => {
   assert.equal(entries.get(key), next);
   removeDraftBackup(key, next);
   assert.equal(entries.has(key), false);
+});
+
+test('uses the injected clock and timer functions', () => {
+  let time = 1_700_000_000_000;
+  const scheduled = [];
+  const cancelled = [];
+  let saves = 0;
+  const controller = createAutosave(
+    () => { saves++; },
+    (run, delay) => { const id = scheduled.length; scheduled.push({ run, delay }); return id; },
+    (id) => { cancelled.push(id); },
+    () => time,
+  );
+  assert.equal(controller.now(), 1_700_000_000_000);
+  time += 2500;
+  assert.equal(controller.now(), 1_700_000_002_500);
+  controller.queue();
+  controller.queue(5000);
+  assert.deepEqual(scheduled.map((s) => s.delay), [2000, 5000]);
+  assert.deepEqual(cancelled, [0]);
+  scheduled[1].run();
+  assert.equal(saves, 1);
+  controller.stop();
+  assert.deepEqual(cancelled, [0]);   // already fired: nothing left to cancel
+});
+
+test('warns on leave only while work could be lost', () => {
+  const cases = [
+    ['saved', true, false, false],
+    ['loading', false, false, false],
+    ['error', false, false, false],   // load failed: no model to lose
+    ['error', true, false, true],     // save failed with edits
+    ['dirty', true, false, true],
+    ['saving', true, false, true],
+    ['conflict', true, false, true],
+    ['saved', true, true, true],      // inspector input not yet applied
+  ];
+  for (const [state, hasModel, pending, expected] of cases) {
+    assert.equal(shouldWarnOnLeave(state, hasModel, pending), expected, `${state}/${hasModel}/${pending}`);
+  }
+});
+
+test('a failing storage write throws so the store can report it and keep the edit', (t) => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: () => null,
+      setItem: () => { throw new DOMException('quota', 'QuotaExceededError'); },
+      removeItem: () => {},
+    },
+  });
+  t.after(() => {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original);
+    else delete globalThis.localStorage;
+  });
+  const backup = { model: { views: [] }, revision: 1, editedAt: 1000, tab: 'a' };
+  assert.throws(() => writeDraftBackup('aa:draft:u:p', backup), { name: 'QuotaExceededError' });
+  assert.deepEqual(backup.model, { views: [] });
 });

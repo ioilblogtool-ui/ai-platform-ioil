@@ -101,7 +101,7 @@ export const useStudio = create<StudioState>((set, get) => {
     try {
       tab ??= crypto.randomUUID();
       const raw = writeDraftBackup(backupKey, {
-        model: committedModel, revision: baseRevision, editedAt: Date.now(), tab,
+        model: committedModel, revision: baseRevision, editedAt: autosave.now(), tab,
       });
       if (!raw) {
         clearBackup();
@@ -164,6 +164,8 @@ export const useStudio = create<StudioState>((set, get) => {
         backup();
         autosave.queue();
       } else {
+        // 서버에 모두 저장됐으므로 이전 백업 실패 안내는 더 이상 유효하지 않다
+        set({ backupMessage: null });
         clearBackup();
       }
     } catch (error) {
