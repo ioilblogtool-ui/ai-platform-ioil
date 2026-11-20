@@ -118,18 +118,24 @@ router.patch('/:id', requireAuth, async (req, res) => {
 router.post('/:id/approve', requireAuth, async (req, res) => {
   const { data: doc } = await supabase
     .from('documents')
-    .select('*, content_items(id, status)')
+    .select('*, content_items!inner(id, status)')
     .eq('id', req.params.id)
     .eq('user_id', req.user.id)
+    .eq('content_items.user_id', req.user.id)
     .single();
 
   if (!doc) return res.status(404).json({ error: '문서를 찾을 수 없습니다.' });
 
   // 문서 승인
-  await supabase
+  const { error: approveError } = await supabase
     .from('documents')
     .update({ status: 'approved' })
-    .eq('id', req.params.id);
+    .eq('id', req.params.id)
+    .eq('user_id', req.user.id)
+    .eq('content_item_id', doc.content_item_id)
+    .select('id')
+    .single();
+  if (approveError) return res.status(500).json({ error: '문서를 승인하지 못했습니다.' });
 
   // doc_type → content status 자동 전이 매핑
   const AUTO_TRANSITION = { plan: 'planned', design: 'designed', dev_request: 'ready_dev' };
@@ -137,12 +143,16 @@ router.post('/:id/approve', requireAuth, async (req, res) => {
   let updatedItem = null;
 
   if (nextStatus) {
-    const { data: item } = await supabase
+    const { data: item, error: transitionError } = await supabase
       .from('content_items')
       .update({ status: nextStatus })
       .eq('id', doc.content_item_id)
+      .eq('user_id', req.user.id)
       .select()
       .single();
+    if (transitionError) {
+      return res.status(500).json({ error: '문서는 승인됐지만 콘텐츠 상태를 변경하지 못했습니다.' });
+    }
     updatedItem = item;
 
     await logActivity({

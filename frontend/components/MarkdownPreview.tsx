@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -36,24 +37,25 @@ interface Props {
 }
 
 export default function MarkdownPreview({ content, style }: Props) {
-  const [html, setHtml] = useState('');
+  const [html, setHtml] = useState<string | null>(null);
 
   useEffect(() => {
     try {
-      setHtml(marked.parse(content) as string);
+      const parsed = marked.parse(content, { async: false });
+      setHtml(DOMPurify.sanitize(parsed, { USE_PROFILES: { html: true } }));
     } catch {
-      setHtml(`<pre>${content}</pre>`);
+      setHtml(null);
     }
   }, [content]);
 
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: MD_STYLES }} />
-      <div
-        className="md-preview"
-        style={style}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      {html === null ? (
+        <div className="md-preview" style={style}><pre>{content}</pre></div>
+      ) : (
+        <div className="md-preview" style={style} dangerouslySetInnerHTML={{ __html: html }} />
+      )}
     </>
   );
 }
