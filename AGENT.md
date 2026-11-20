@@ -7,7 +7,7 @@
 
 ## 프로젝트 한 줄 요약
 
-Next.js 14 + Express + Supabase로 구성된 **Content Ops Dashboard** — 콘텐츠 기획→AI 생성→개발→배포 워크플로우 관리.
+Next.js 16, Node.js 24, Express, Supabase로 구성된 플랫폼이다. `/portal`에서 Content Ops와 나만의 AI를 연다.
 
 ---
 
@@ -33,7 +33,7 @@ Next.js 14 + Express + Supabase로 구성된 **Content Ops Dashboard** — 콘�
 ✅ API 호출: frontend/lib/api.ts 의 기존 함수 사용
 ✅ 새 페이지: app/(ops)/ 하위, 'use client' 선언 필수
 ✅ Claude 응답 JSON 파싱: parseJsonSafe() 사용
-✅ 백엔드 AI 생성: runJob() 헬퍼 사용
+✅ 백엔드 AI 문서 생성: createJob()과 runInBackground() 패턴 사용
 ```
 
 ---
@@ -50,8 +50,8 @@ Next.js 14 + Express + Supabase로 구성된 **Content Ops Dashboard** — 콘�
 
 ## 현재 구현 상태
 
-**Phase 5 완료** — 모든 21개 화면 구현 완료.
-개선 후보: Ideas 탭 연동, WebSocket 실시간 업데이트, Settings API 키 관리, 칸반 드래그앤드롭.
+Content Ops Phase 5 이후 나만의 AI와 가계부가 추가됐다.
+개선 후보는 Jobs 실제 재시도 연결, 실시간 업데이트, Settings 백엔드 연동, 칸반 드래그앤드롭이다.
 
 ---
 

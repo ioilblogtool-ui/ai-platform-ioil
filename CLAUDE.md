@@ -10,12 +10,14 @@
 
 | Layer | Stack |
 |---|---|
-| Frontend | Next.js 14 App Router, TypeScript, inline CSS (no Tailwind) |
-| Backend | Express.js, Node.js (port 4000) |
+| Frontend | Next.js 16 App Router, React 19, TypeScript, inline CSS |
+| Backend | Express.js, Node.js 24 LTS (로컬 포트 4000) |
 | DB | Supabase (PostgreSQL) + RLS |
 | Auth | Supabase Auth (JWT Bearer token) |
 | AI | Anthropic Claude API (`claude-sonnet-4-6`) |
-| Deploy | Railway (backend) / Vercel (frontend) |
+| Deploy | Railway Railpack (backend) / Vercel (frontend) |
+
+`/`는 `/portal`로 이동한다. 포털에서 Content Ops와 나만의 AI를 선택한다. 개인 대시보드 라우트는 `frontend/app/(my-ai)/`, API는 `backend/routes/my-ai/`에 있다. 설치 순서는 [README](README.md)를 참조한다.
 
 ---
 
@@ -51,7 +53,7 @@ ai-platform-ioil/
 │   ├── index.js                # Express 앱 + 라우트 등록 + 스케줄러 시작
 │   ├── lib/
 │   │   ├── activity.js         # logActivity() 헬퍼
-│   │   └── scheduler.js        # node-cron 자동 아이디어 생성 (매일 09:00 KST)
+│   │   └── scheduler.js        # 선택적 자동 아이디어 생성 (매일 자정 KST)
 │   └── routes/
 │       ├── auth.js, chat.js, conversations.js, tasks.js
 │       ├── contents.js         # Content Ops CRUD + /transition + /stats + /check-similarity + /auto-generate
@@ -90,7 +92,7 @@ idea → planned → designed → ready_dev → in_dev → deployed → archived
 ```
 - Plan 승인 → `planned`
 - Design 승인 → `designed`
-- Dev Request 저장 후 수동 전환 → `ready_dev`
+- Dev Request 승인 또는 수동 전환 → `ready_dev`
 - 파이프라인 스텝 클릭으로 직접 전환 가능 (layout.tsx에서 처리)
 - `deployed` → `archived`: 헤더 Archive 버튼
 - `archived` → `idea`: 헤더 Restore 버튼
@@ -142,7 +144,7 @@ ALTER TABLE generation_jobs ADD CONSTRAINT generation_jobs_status_check
 ### 백엔드 인증
 - 모든 라우트에 `requireAuth` 미들웨어 적용
 - Supabase service role key로 DB 접근 (RLS 우회 가능)
-- `req.user.sub` = Supabase user UUID
+- `req.user.id` = Supabase user UUID
 
 ### UI 디자인 원칙
 - 배경: `#080809` (거의 검정)
@@ -174,14 +176,14 @@ function parseJsonSafe(text) {
 `generate.js`와 `contents.js` 양쪽에 동일하게 적용.
 
 ### AI 생성 패턴 (backend/routes/generate.js)
-- `runJob(supabase, userId, contentItemId, jobType, generatorFn)` 헬퍼 사용
+- 문서 생성은 `createJob()`으로 작업을 등록하고 `runInBackground()`로 같은 서버 프로세스에서 실행
 - 생성 결과는 `documents` 테이블에 저장
 - 각 생성 후 `logActivity()` 호출
 - Design 생성 시 `doc_templates`에서 템플릿 조회 후 systemPrompt에 주입
 
 ### 자동 아이디어 생성 스케줄러 (backend/lib/scheduler.js)
-- `node-cron` 사용, 매일 UTC 00:00 (KST 09:00) 실행
-- `SCHEDULER_USER_ID` 환경변수 필수 (Railway Variables에 설정)
+- 활성화 시 매일 UTC 15:00 (KST 00:00) 실행
+- Railway 운영에서는 `SCHEDULER_USER_ID`를 제거해 비활성화했다. 유효한 Supabase 사용자 UUID를 설정하면 서버 기동 시 등록된다.
 - 계산기 1개 + 리포트 1개 생성 (Claude 1 call → 2 content_items → 2 ideas)
 - 카테고리 로테이션: 최근 10개에 없는 PRIORITY_CATEGORIES 우선 선택
 - notes 필드: `제휴 힌트: {hint}\n확장 시리즈: {expansion}` 형식으로 저장
@@ -219,6 +221,8 @@ cd frontend && npm run dev  # port 3000
 Supabase SQL Editor에서 순서대로 실행:
 1. `supabase/schema.sql`
 2. `supabase/schema_content_ops.sql`
+
+나만의 AI와 가계부까지 초기화하려면 [README의 SQL 적용 순서](README.md#1-nodejs와-supabase-준비)를 따른다.
 
 ---
 
