@@ -286,6 +286,12 @@ describe('graph-mapper', () => {
     assert.equal(sortParentsFirst(view(m).nodes).length, view(m).nodes.length);
   });
 
+  it('나중에 만든 그룹도 같은 깊이의 다른 노드보다 먼저(아래에) 그린다', () => {
+    const { m, a, b, g } = setup();   // client, service, group 순으로 추가됨
+    const order = toFlow(m, VIEW).nodes.map((n) => n.id);
+    assert.deepEqual(order, [g, a, b]);
+  });
+
   it('group은 크기, note는 글을 data로 넘긴다', () => {
     let { m, g, newId } = setup();
     m = ops.addNote(m, VIEW, { x: 0, y: 500 }, 'memo', newId).model;

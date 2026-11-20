@@ -41,9 +41,12 @@ export function sortParentsFirst(nodes: ViewNode[]): ViewNode[] {
     depth.set(n.id, d);
     return d;
   };
+  // 같은 깊이에서는 그룹을 먼저 둔다 — React Flow는 배열 뒤쪽을 위에 그리므로, 나중에 만든 그룹이
+  // 이미 있던 노드를 덮어 클릭·드래그를 가로채지 않게 한다 (Sprint 2 Step 4 발견)
+  const groupFirst = (n: ViewNode) => (n.kind === 'group' ? 0 : 1);
   return nodes
     .map((n, i) => ({ n, i, d: depthOf(n) }))
-    .sort((a, b) => a.d - b.d || a.i - b.i)
+    .sort((a, b) => a.d - b.d || groupFirst(a.n) - groupFirst(b.n) || a.i - b.i)
     .map((x) => x.n);
 }
 
