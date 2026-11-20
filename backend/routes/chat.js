@@ -6,6 +6,19 @@ const { requireAuth } = require('../middleware/auth');
 const router = express.Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// 로그인한 사용자 소유의 대화만 반환 (없거나 남의 것이면 null)
+async function findOwnedConversation(conversationId, userId) {
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('id, project:projects(system_prompt)')
+    .eq('id', conversationId)
+    .eq('user_id', userId)
+    .eq('project.user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 // POST /api/chat
 // 메시지 전송 + Claude 응답 + DB 저장
 router.post('/', requireAuth, async (req, res) => {
@@ -24,12 +37,15 @@ router.post('/', requireAuth, async (req, res) => {
     if (!convId) {
       // 프로젝트의 시스템 프롬프트 가져오기
       if (project_id) {
-        const { data: project } = await supabase
+        const { data: project, error: projectError } = await supabase
           .from('projects')
           .select('system_prompt')
           .eq('id', project_id)
-          .single();
-        if (project?.system_prompt) systemPrompt = project.system_prompt;
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (projectError) throw projectError;
+        if (!project) return res.status(404).json({ error: '프로젝트를 찾을 수 없습니다.' });
+        if (project.system_prompt) systemPrompt = project.system_prompt;
       }
 
       const { data: newConv, error: convError } = await supabase
@@ -45,13 +61,10 @@ router.post('/', requireAuth, async (req, res) => {
       if (convError) throw convError;
       convId = newConv.id;
     } else {
-      // 기존 대화의 프로젝트 시스템 프롬프트 가져오기
-      const { data: conv } = await supabase
-        .from('conversations')
-        .select('project:projects(system_prompt)')
-        .eq('id', convId)
-        .single();
-      if (conv?.project?.system_prompt) systemPrompt = conv.project.system_prompt;
+      // 기존 대화: 본인 소유인지 확인 후 프로젝트 시스템 프롬프트 사용
+      const conv = await findOwnedConversation(convId, userId);
+      if (!conv) return res.status(404).json({ error: '대화를 찾을 수 없습니다.' });
+      if (conv.project?.system_prompt) systemPrompt = conv.project.system_prompt;
     }
 
     // 2. 이전 메시지 히스토리 가져오기 (최근 20개)
@@ -110,6 +123,22 @@ router.post('/', requireAuth, async (req, res) => {
 router.post('/stream', requireAuth, async (req, res) => {
   const { conversation_id, message } = req.body;
   const userId = req.user.id;
+
+  if (!conversation_id) {
+    return res.status(400).json({ error: 'conversation_id가 필요합니다.' });
+  }
+  if (!message || !message.trim()) {
+    return res.status(400).json({ error: '메시지를 입력해주세요.' });
+  }
+
+  // 스트림을 열기 전에 대화 소유권 확인
+  try {
+    const conv = await findOwnedConversation(conversation_id, userId);
+    if (!conv) return res.status(404).json({ error: '대화를 찾을 수 없습니다.' });
+  } catch (err) {
+    console.error('Chat stream ownership check error:', err);
+    return res.status(500).json({ error: '대화 확인 중 오류가 발생했습니다.' });
+  }
 
   // SSE 헤더 설정
   res.setHeader('Content-Type', 'text/event-stream');
