@@ -45,6 +45,14 @@ describe('type registry single source', { skip: dbSkipReason }, () => {
     assert.equal(res.status, 200);
     assert.deepEqual(res.body.data, json);
   });
+
+  it('레지스트리는 캐시하되 매번 재검증한다 (ETag → 304)', async () => {
+    const res = await api(A).get('/api/aa/meta/types');
+    assert.match(res.headers['cache-control'], /no-cache/);
+    assert.ok(res.headers.etag);
+    const again = await api(A).get('/api/aa/meta/types').set('If-None-Match', res.headers.etag);
+    assert.equal(again.status, 304);
+  });
 });
 
 describe('Sprint 1 draft compatibility & V6 over the API', { skip: dbSkipReason }, () => {

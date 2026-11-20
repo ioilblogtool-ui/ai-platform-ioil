@@ -155,6 +155,25 @@ export function setParent(model: ArchitectureModel, viewId: string, nodeId: stri
   });
 }
 
+/**
+ * 캔버스 절대 좌표 point를 품는 그룹 중 가장 안쪽(면적이 가장 작은) 그룹. 없으면 null.
+ * movingNodeId를 주면 그 노드 자신과 그 하위 그룹은 후보에서 뺀다 (순환 방지).
+ */
+export function findDropGroup(model: ArchitectureModel, viewId: string, point: Point, movingNodeId?: string): string | null {
+  const v = getView(model, viewId);
+  if (!v) return null;
+  let best: { id: string; area: number } | null = null;
+  for (const g of v.nodes) {
+    if (g.kind !== 'group' || !g.width || !g.height) continue;
+    if (movingNodeId && isSelfOrDescendant(v, g.id, movingNodeId)) continue;
+    const p = absolutePosition(v, g.id);
+    if (point.x < p.x || point.y < p.y || point.x > p.x + g.width || point.y > p.y + g.height) continue;
+    const area = g.width * g.height;
+    if (!best || area < best.area) best = { id: g.id, area };
+  }
+  return best?.id ?? null;
+}
+
 // ── 연결 ─────────────────────────────────────────────────
 
 export function connect(

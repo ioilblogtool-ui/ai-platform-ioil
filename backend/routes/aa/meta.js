@@ -7,7 +7,9 @@ const { REGISTRY: registry } = require('../../lib/aa/architecture-validator');
 const router = express.Router();
 
 router.get('/types', requireAuth, (req, res) => {
-  res.set('Cache-Control', 'private, max-age=3600');
+  // 매번 재검증 (ETag → 304). max-age로 두면 레지스트리가 바뀐 뒤에도 브라우저가 옛 정의를 써서
+  // 팔레트·기본값이 서버 검증(V6)과 어긋난다 (Sprint 2 Step 3 발견)
+  res.set('Cache-Control', 'private, no-cache');
   res.json({ data: registry });
 });
 

@@ -18,6 +18,9 @@ export type AaGroupFlowNode = Node<GroupNodeData, 'group'>;
 export type AaNoteFlowNode = Node<NoteNodeData, 'note'>;
 export type AaFlowNode = AaComponentFlowNode | AaGroupFlowNode | AaNoteFlowNode;
 
+export type RelationEdgeData = { relationId: string; protocol?: string; label?: string; mode?: 'sync' | 'async' };
+export type AaFlowEdge = Edge<RelationEdgeData, 'relation'>;
+
 export function getView(model: ArchitectureModel, viewId: string): View | undefined {
   return model.views.find((v) => v.id === viewId);
 }
@@ -45,7 +48,7 @@ export function sortParentsFirst(nodes: ViewNode[]): ViewNode[] {
 }
 
 /** 한 View의 노드·엣지를 React Flow 형태로 */
-export function toFlow(model: ArchitectureModel, viewId: string, selectedNodeIds: Set<string> = new Set()): { nodes: AaFlowNode[]; edges: Edge[] } {
+export function toFlow(model: ArchitectureModel, viewId: string, selectedNodeIds: Set<string> = new Set()): { nodes: AaFlowNode[]; edges: AaFlowEdge[] } {
   const view = getView(model, viewId);
   if (!view) return { nodes: [], edges: [] };
 
@@ -65,7 +68,9 @@ export function toFlow(model: ArchitectureModel, viewId: string, selectedNodeIds
     } else if (n.kind === 'group') {
       nodes.push({
         ...base, type: 'group', data: { label: n.label ?? '' },
-        width: n.width, height: n.height, style: { width: n.width, height: n.height },
+        width: n.width, height: n.height,
+        // React Flow 기본 .react-flow__node-group 스타일(패딩·테두리·배경)을 끄고 GroupNode가 그린다
+        style: { width: n.width, height: n.height, padding: 0, background: 'transparent', borderStyle: 'none', borderRadius: 10, boxShadow: 'none' },
       });
     } else if (n.kind === 'note') {
       nodes.push({ ...base, type: 'note', data: { text: n.text ?? '' } });
@@ -73,21 +78,21 @@ export function toFlow(model: ArchitectureModel, viewId: string, selectedNodeIds
   }
 
   const nodeByComponent = new Map(view.nodes.filter((n) => n.componentId).map((n) => [n.componentId!, n.id]));
-  const edges: Edge[] = view.edges
+  const edges: AaFlowEdge[] = view.edges
     .map((e) => {
       const r: Relation | undefined = model.relations[e.relationId];
       if (!r) return null;
       const source = nodeByComponent.get(r.from);
       const target = nodeByComponent.get(r.to);
       if (!source || !target) return null;
-      const label = [r.protocol, r.label].filter(Boolean).join(' · ') || undefined;
-      return {
-        id: e.id, source, target, label,
+      const edge: AaFlowEdge = {
+        id: e.id, source, target, type: 'relation',
         sourceHandle: e.sourceHandle, targetHandle: e.targetHandle,
-        style: r.mode === 'async' ? { strokeDasharray: '6 4' } : undefined,
-      } as Edge;
+        data: { relationId: r.id, protocol: r.protocol, label: r.label, mode: r.mode },
+      };
+      return edge;
     })
-    .filter((e): e is Edge => e !== null);
+    .filter((e): e is AaFlowEdge => e !== null);
 
   return { nodes, edges };
 }
