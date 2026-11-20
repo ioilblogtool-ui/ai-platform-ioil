@@ -44,10 +44,12 @@ export default function AuthPage() {
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center',
-      justifyContent: 'center', background: '#0e0e0f', fontFamily: 'system-ui, sans-serif'
+      justifyContent: 'center', background: '#0e0e0f', fontFamily: 'system-ui, sans-serif',
+      boxSizing: 'border-box', padding: 16
     }}>
       <div style={{
-        width: 360, background: '#161618', border: '1px solid rgba(255,255,255,0.08)',
+        width: 418, maxWidth: '100%', boxSizing: 'border-box',
+        background: '#161618', border: '1px solid rgba(255,255,255,0.08)',
         borderRadius: 16, padding: '32px 28px'
       }}>
         <h1 style={{ fontSize: 22, fontWeight: 500, color: '#c8a96e', marginBottom: 4 }}>
@@ -123,6 +125,7 @@ const inputStyle: React.CSSProperties = {
   padding: '10px 14px',
   outline: 'none',
   width: '100%',
+  boxSizing: 'border-box',
 };
 
 const btnStyle: React.CSSProperties = {
