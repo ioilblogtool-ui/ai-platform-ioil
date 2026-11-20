@@ -1,21 +1,97 @@
 {
-  "version": 1,
+  "version": 2,
   "categories": [
     { "key": "application", "label": "Application" },
     { "key": "data", "label": "Data" },
     { "key": "general", "label": "General" }
   ],
+  "propertyTypes": ["string", "text", "number", "boolean", "enum", "list"],
   "types": {
-    "client":   { "label": "Client",   "category": "application", "layer": "logical", "icon": "▭", "nodeKind": "component", "views": ["logical"], "properties": [] },
-    "gateway":  { "label": "Gateway",  "category": "application", "layer": "logical", "icon": "⇲", "nodeKind": "component", "views": ["logical"], "properties": [] },
-    "service":  { "label": "Service",  "category": "application", "layer": "logical", "icon": "⬢", "nodeKind": "component", "views": ["logical"], "properties": [] },
-    "worker":   { "label": "Worker",   "category": "application", "layer": "logical", "icon": "⚙", "nodeKind": "component", "views": ["logical"], "properties": [] },
-    "external": { "label": "External", "category": "application", "layer": "logical", "icon": "◌", "nodeKind": "component", "views": ["logical"], "properties": [] },
-    "database": { "label": "Database", "category": "data",        "layer": "logical", "icon": "◫", "nodeKind": "component", "views": ["logical"], "properties": [] },
-    "cache":    { "label": "Cache",    "category": "data",        "layer": "logical", "icon": "⚡", "nodeKind": "component", "views": ["logical"], "properties": [] },
-    "queue":    { "label": "Queue",    "category": "data",        "layer": "logical", "icon": "☰", "nodeKind": "component", "views": ["logical"], "properties": [] },
-    "storage":  { "label": "Storage",  "category": "data",        "layer": "logical", "icon": "▥", "nodeKind": "component", "views": ["logical"], "properties": [] },
-    "group":    { "label": "Boundary", "category": "general",     "layer": "general", "icon": "⬚", "nodeKind": "group",     "views": ["logical"], "properties": [] },
-    "note":     { "label": "Note",     "category": "general",     "layer": "general", "icon": "✎", "nodeKind": "note",      "views": ["logical"], "properties": [] }
+    "client": {
+      "label": "Client", "category": "application", "layer": "logical", "icon": "▭", "nodeKind": "component", "views": ["logical"],
+      "aliases": ["web", "mobile", "browser", "frontend"],
+      "properties": [
+        { "key": "channel", "label": "채널", "type": "enum", "options": ["web", "mobile", "desktop", "cli"] }
+      ]
+    },
+    "gateway": {
+      "label": "Gateway", "category": "application", "layer": "logical", "icon": "⇲", "nodeKind": "component", "views": ["logical"],
+      "aliases": ["api gateway", "ingress", "proxy", "nginx"],
+      "properties": [
+        { "key": "product", "label": "제품", "type": "string", "placeholder": "Spring Cloud Gateway" },
+        { "key": "rateLimit", "label": "요청 제한", "type": "string", "placeholder": "100 req/s" }
+      ]
+    },
+    "service": {
+      "label": "Service", "category": "application", "layer": "logical", "icon": "⬢", "nodeKind": "component", "views": ["logical"],
+      "aliases": ["api", "backend", "server", "microservice"],
+      "properties": [
+        { "key": "runtime", "label": "Runtime", "type": "string", "placeholder": "Java 21" },
+        { "key": "port", "label": "Port", "type": "number", "min": 1, "max": 65535, "integer": true },
+        { "key": "stateless", "label": "Stateless", "type": "boolean", "default": true },
+        { "key": "replicas", "label": "Replicas", "type": "number", "min": 0, "max": 1000, "integer": true }
+      ]
+    },
+    "worker": {
+      "label": "Worker", "category": "application", "layer": "logical", "icon": "⚙", "nodeKind": "component", "views": ["logical"],
+      "aliases": ["batch", "job", "cron", "consumer"],
+      "properties": [
+        { "key": "runtime", "label": "Runtime", "type": "string" },
+        { "key": "trigger", "label": "실행 방식", "type": "enum", "options": ["schedule", "queue", "event"] },
+        { "key": "schedule", "label": "스케줄", "type": "string", "placeholder": "0 3 * * *" }
+      ]
+    },
+    "external": {
+      "label": "External", "category": "application", "layer": "logical", "icon": "◌", "nodeKind": "component", "views": ["logical"],
+      "aliases": ["3rd party", "saas", "partner"],
+      "properties": [
+        { "key": "owner", "label": "담당", "type": "string" },
+        { "key": "contractRef", "label": "계약 참조", "type": "string", "placeholder": "OpenAPI URL 또는 문서 이름" }
+      ]
+    },
+    "database": {
+      "label": "Database", "category": "data", "layer": "logical", "icon": "◫", "nodeKind": "component", "views": ["logical"],
+      "aliases": ["db", "postgres", "postgresql", "mysql", "mongodb", "rdbms"],
+      "properties": [
+        { "key": "engine", "label": "엔진", "type": "enum", "options": ["postgres", "mysql", "mongodb", "other"] },
+        { "key": "version", "label": "버전", "type": "string" },
+        { "key": "ha", "label": "고가용성", "type": "enum", "options": ["none", "replica", "multi-az"] }
+      ]
+    },
+    "cache": {
+      "label": "Cache", "category": "data", "layer": "logical", "icon": "⚡", "nodeKind": "component", "views": ["logical"],
+      "aliases": ["redis", "memcached"],
+      "properties": [
+        { "key": "engine", "label": "엔진", "type": "enum", "options": ["redis", "memcached", "other"] },
+        { "key": "purpose", "label": "용도", "type": "enum", "options": ["cache", "session", "rate-limit", "lock"] },
+        { "key": "ttl", "label": "TTL", "type": "string", "placeholder": "10m" }
+      ]
+    },
+    "queue": {
+      "label": "Queue", "category": "data", "layer": "logical", "icon": "☰", "nodeKind": "component", "views": ["logical"],
+      "aliases": ["kafka", "rabbitmq", "sqs", "mq", "topic"],
+      "properties": [
+        { "key": "engine", "label": "엔진", "type": "enum", "options": ["kafka", "rabbitmq", "sqs", "other"] },
+        { "key": "topic", "label": "토픽·큐 이름", "type": "string" }
+      ]
+    },
+    "storage": {
+      "label": "Storage", "category": "data", "layer": "logical", "icon": "▥", "nodeKind": "component", "views": ["logical"],
+      "aliases": ["s3", "blob", "bucket", "file"],
+      "properties": [
+        { "key": "kind", "label": "종류", "type": "enum", "options": ["object", "block", "file"] },
+        { "key": "bucket", "label": "버킷·경로", "type": "string" }
+      ]
+    },
+    "group": {
+      "label": "Boundary", "category": "general", "layer": "general", "icon": "⬚", "nodeKind": "group", "views": ["logical"],
+      "aliases": ["group", "boundary", "zone"],
+      "properties": []
+    },
+    "note": {
+      "label": "Note", "category": "general", "layer": "general", "icon": "✎", "nodeKind": "note", "views": ["logical"],
+      "aliases": ["memo", "comment"],
+      "properties": []
+    }
   }
 }

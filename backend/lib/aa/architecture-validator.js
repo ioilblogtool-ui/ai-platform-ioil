@@ -1,6 +1,9 @@
 // 아키텍처 모델 저장 전 검증 (03 데이터 모델 §2.2)
-// Sprint 1: V1~V5, V7(경고), V8, V12. V6(타입 레지스트리 속성 검증)은 Sprint 2.
+// V1~V6, V7(경고), V8, V12.
+// V6: 타입 레지스트리(type-registry.json — /api/aa/meta/types와 같은 원본) 기준 컴포넌트 타입·속성 검증.
+//     모든 속성은 선택 항목이다. 있는 키만 검사하고, 기본값을 채우거나 값을 바꾸지 않는다 (Sprint 1 저장본 호환).
 const { scanForSecrets } = require('./sensitive-scan');
+const REGISTRY = require('./type-registry.json');
 
 const MODEL_MAX_BYTES = 1024 * 1024;   // V8: 모델 1MB
 const MODEL_MAX_COMPONENTS = 500;      // V8: 컴포넌트 500개
@@ -19,6 +22,41 @@ const VIEW_KINDS = new Set(['logical', 'deployment', 'kubernetes', 'aws', 'apifl
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isFiniteNum = (v) => typeof v === 'number' && Number.isFinite(v);
+
+const NOTE_TEXT_MAX = 2000;
+const GROUP_MIN_SIZE = 80;
+const STRING_MAX = 500;
+const TEXT_MAX = 5000;
+const LIST_MAX_ITEMS = 50;
+
+// V6: 속성 값 하나를 스키마 정의로 검사. 문제 없으면 null, 있으면 메시지
+function checkPropertyValue(def, value) {
+  switch (def.type) {
+    case 'string':
+      if (typeof value !== 'string') return '문자열이어야 합니다.';
+      if (value.length > STRING_MAX) return `${STRING_MAX}자 이하여야 합니다.`;
+      if (def.pattern && !new RegExp(def.pattern).test(value)) return '형식이 맞지 않습니다.';
+      return null;
+    case 'text':
+      if (typeof value !== 'string') return '문자열이어야 합니다.';
+      return value.length > TEXT_MAX ? `${TEXT_MAX}자 이하여야 합니다.` : null;
+    case 'number':
+      if (!isFiniteNum(value)) return '숫자여야 합니다.';
+      if (def.integer && !Number.isInteger(value)) return '정수여야 합니다.';
+      if (def.min !== undefined && value < def.min) return `${def.min} 이상이어야 합니다.`;
+      if (def.max !== undefined && value > def.max) return `${def.max} 이하여야 합니다.`;
+      return null;
+    case 'boolean':
+      return typeof value === 'boolean' ? null : 'true 또는 false여야 합니다.';
+    case 'enum':
+      return def.options.includes(value) ? null : `다음 중 하나여야 합니다: ${def.options.join(', ')}`;
+    case 'list':
+      if (!Array.isArray(value) || value.length > LIST_MAX_ITEMS) return `문자열 ${LIST_MAX_ITEMS}개 이하의 배열이어야 합니다.`;
+      return value.every((x) => typeof x === 'string' && x.length <= 200) ? null : '각 항목은 200자 이하 문자열이어야 합니다.';
+    default:
+      return `알 수 없는 속성 타입입니다: ${def.type}`;
+  }
+}
 
 /**
  * @returns {{ errors: {rule,path,message}[], warnings: {rule,path,message}[], tooLarge: null | {bytes,components} }}
@@ -63,6 +101,30 @@ function validateModel(model) {
     if (typeof c.name !== 'string' || !c.name.trim() || c.name.length > 120) err('STRUCTURE', `${p}.name`, 'name은 1~120자 문자열이어야 합니다.');
     if (c.properties !== undefined && !isObj(c.properties)) err('STRUCTURE', `${p}.properties`, 'properties는 객체여야 합니다.');
     if (c.requirementIds !== undefined && !Array.isArray(c.requirementIds)) err('STRUCTURE', `${p}.requirementIds`, 'requirementIds는 배열이어야 합니다.');
+    if (c.custom !== undefined && !(isObj(c.custom) && Object.values(c.custom).every((v) => typeof v === 'string' && v.length <= STRING_MAX))) {
+      err('STRUCTURE', `${p}.custom`, `custom은 ${STRING_MAX}자 이하 문자열 값의 객체여야 합니다.`);
+    }
+
+    // V6: 타입·layer·속성
+    if (typeof c.type === 'string' && c.type) {
+      const def = Object.prototype.hasOwnProperty.call(REGISTRY.types, c.type) ? REGISTRY.types[c.type] : null;
+      if (!def) {
+        err('V6', `${p}.type`, `등록되지 않은 컴포넌트 타입입니다: ${c.type}`);
+      } else if (def.nodeKind !== 'component') {
+        err('V6', `${p}.type`, `${c.type}은(는) 컴포넌트가 아니라 ${def.nodeKind} 노드입니다.`);
+      } else {
+        if (c.layer !== def.layer) err('V6', `${p}.layer`, `${c.type}의 layer는 ${def.layer}여야 합니다.`);
+        if (isObj(c.properties)) {
+          const schema = new Map(def.properties.map((d) => [d.key, d]));
+          for (const [key, value] of Object.entries(c.properties)) {
+            const pd = schema.get(key);
+            if (!pd) { err('V6', `${p}.properties.${key}`, `${c.type}에 없는 속성입니다: ${key} (자유 속성은 custom에 넣으세요)`); continue; }
+            const problem = checkPropertyValue(pd, value);
+            if (problem) err('V6', `${p}.properties.${key}`, `${pd.label || key}: ${problem}`);
+          }
+        }
+      }
+    }
   }
 
   // V2: 관계 끝점
@@ -105,6 +167,17 @@ function validateModel(model) {
         else { componentNodeInView.set(n.componentId, n.id); componentsWithNode.add(n.componentId); }
       } else if (n.kind === 'component') {
         err('V3', `${np}.componentId`, 'component 노드에는 componentId가 필요합니다.');
+      }
+      // group·note는 컴포넌트가 아닌 노드 — 자체 규칙
+      if (n.kind === 'note') {
+        if (n.componentId) err('V3', `${np}.componentId`, 'note 노드는 컴포넌트를 가리키지 않습니다.');
+        if (typeof n.text !== 'string' || !n.text.trim() || n.text.length > NOTE_TEXT_MAX) err('V3', `${np}.text`, `note에는 1~${NOTE_TEXT_MAX}자 text가 필요합니다.`);
+      }
+      if (n.kind === 'group') {
+        if (!isFiniteNum(n.width) || !isFiniteNum(n.height) || n.width < GROUP_MIN_SIZE || n.height < GROUP_MIN_SIZE) {
+          err('V3', `${np}`, `group에는 ${GROUP_MIN_SIZE} 이상의 width·height가 필요합니다.`);
+        }
+        if (n.label !== undefined && (typeof n.label !== 'string' || n.label.length > 120)) err('V3', `${np}.label`, 'group label은 120자 이하 문자열이어야 합니다.');
       }
     });
 
@@ -149,4 +222,4 @@ function validateModel(model) {
   return { errors, warnings, tooLarge: null };
 }
 
-module.exports = { validateModel, MODEL_MAX_BYTES, MODEL_MAX_COMPONENTS };
+module.exports = { validateModel, MODEL_MAX_BYTES, MODEL_MAX_COMPONENTS, REGISTRY, NOTE_TEXT_MAX, GROUP_MIN_SIZE };

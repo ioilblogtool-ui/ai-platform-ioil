@@ -90,6 +90,116 @@ describe('validateModel', () => {
   });
 });
 
+describe('V6: 타입 레지스트리 검증', () => {
+  const { REGISTRY } = require('../../lib/aa/architecture-validator');
+  const v6 = (m) => validateModel(m).errors.filter((e) => e.rule === 'V6');
+
+  it('레지스트리는 11개 타입이고 group·note만 컴포넌트가 아니다', () => {
+    assert.equal(Object.keys(REGISTRY.types).length, 11);
+    const nonComponent = Object.entries(REGISTRY.types).filter(([, d]) => d.nodeKind !== 'component').map(([k]) => k).sort();
+    assert.deepEqual(nonComponent, ['group', 'note']);
+    for (const d of Object.values(REGISTRY.types)) for (const pd of d.properties) assert.ok(REGISTRY.propertyTypes.includes(pd.type), pd.key);
+  });
+
+  it('속성이 비어 있거나 일부만 있어도 통과 (모든 속성은 선택)', () => {
+    const m = sampleModel();
+    m.components.cmp_api00001.properties = {};
+    assert.deepEqual(v6(m), []);
+    m.components.cmp_api00001.properties = { port: 8080 };
+    assert.deepEqual(v6(m), []);
+  });
+
+  it('유효한 속성 값은 통과', () => {
+    const m = sampleModel();
+    m.components.cmp_api00001.properties = { runtime: 'Java 21', port: 8080, stateless: false, replicas: 2 };
+    m.components.cmp_db000001.properties = { engine: 'postgres', version: '16', ha: 'replica' };
+    m.components.cmp_client01.properties = { channel: 'web' };
+    assert.deepEqual(validateModel(m).errors, []);
+  });
+
+  it('등록되지 않은 타입 → V6', () => {
+    const m = sampleModel();
+    m.components.cmp_api00001.type = 'mainframe';
+    assert.ok(v6(m).some((e) => e.path.endsWith('.type')));
+  });
+
+  it('group·note 타입으로 컴포넌트를 만들면 → V6', () => {
+    for (const t of ['group', 'note']) {
+      const m = sampleModel();
+      m.components.cmp_api00001.type = t;
+      assert.ok(v6(m).some((e) => /노드입니다/.test(e.message)), t);
+    }
+  });
+
+  it('스키마에 없는 속성 키 → V6, 같은 값을 custom에 두면 통과', () => {
+    const m = sampleModel();
+    m.components.cmp_api00001.properties = { framework: 'Spring' };
+    assert.ok(v6(m).some((e) => e.path.endsWith('properties.framework')));
+    m.components.cmp_api00001.properties = {};
+    m.components.cmp_api00001.custom = { framework: 'Spring' };
+    assert.deepEqual(validateModel(m).errors, []);
+  });
+
+  it('잘못된 값: 타입·정수·범위·enum·null → 각각 V6', () => {
+    const bad = [
+      { port: '8080' }, { port: 80.5 }, { port: 0 }, { port: 70000 },
+      { stateless: 'yes' }, { replicas: -1 }, { runtime: 21 }, { runtime: null },
+    ];
+    for (const props of bad) {
+      const m = sampleModel();
+      m.components.cmp_api00001.properties = props;
+      assert.equal(v6(m).length, 1, JSON.stringify(props));
+    }
+    const m = sampleModel();
+    m.components.cmp_db000001.properties = { engine: 'oracle' };
+    assert.ok(v6(m).some((e) => /다음 중 하나/.test(e.message)));
+  });
+
+  it('layer가 레지스트리와 다르면 → V6', () => {
+    const m = sampleModel();
+    m.components.cmp_api00001.layer = 'kubernetes';
+    assert.ok(v6(m).some((e) => e.path.endsWith('.layer')));
+  });
+
+  it('custom 값은 문자열만', () => {
+    const m = sampleModel();
+    m.components.cmp_api00001.custom = { n: 1 };
+    assert.ok(validateModel(m).errors.some((e) => e.path.endsWith('.custom')));
+  });
+});
+
+describe('group·note 노드 규칙', () => {
+  const withNodes = (...nodes) => { const m = sampleModel(); m.views[0].nodes.push(...nodes); return m; };
+
+  it('componentId 없는 group(크기 있음)·note(글 있음)는 통과', () => {
+    const m = withNodes(
+      { id: 'nd_g1', kind: 'group', label: 'Platform', position: { x: 0, y: 0 }, width: 400, height: 240 },
+      { id: 'nd_note1', kind: 'note', text: '조회는 캐시 우선', position: { x: 10, y: 300 } },
+    );
+    m.views[0].nodes[1].parentId = 'nd_g1';   // API 노드를 그룹 안에
+    assert.deepEqual(validateModel(m).errors, []);
+  });
+
+  it('group 크기 누락·80 미만 → V3', () => {
+    for (const size of [{}, { width: 400 }, { width: 40, height: 200 }]) {
+      const m = withNodes({ id: 'nd_g1', kind: 'group', position: { x: 0, y: 0 }, ...size });
+      assert.ok(validateModel(m).errors.some((e) => e.rule === 'V3'), JSON.stringify(size));
+    }
+  });
+
+  it('note 글 없음·너무 김·componentId 있음 → V3', () => {
+    for (const extra of [{ text: '' }, { text: 'x'.repeat(2001) }, { text: 'ok', componentId: 'cmp_api00001' }]) {
+      const m = withNodes({ id: 'nd_note1', kind: 'note', position: { x: 0, y: 0 }, ...extra });
+      assert.ok(validateModel(m).errors.some((e) => e.rule === 'V3'), JSON.stringify(extra).slice(0, 40));
+    }
+  });
+
+  it('note 글의 키·토큰도 V12로 막는다', () => {
+    const m = withNodes({ id: 'nd_note1', kind: 'note', position: { x: 0, y: 0 }, text: 'key=AKIA' + 'ABCDEFGHIJKLMNOP' });
+    assert.ok(validateModel(m).errors.some((e) => e.rule === 'V12'));
+  });
+});
+
 describe('scanForSecrets', () => {
   it('키·JWT·PEM을 찾고 일반 문자열은 통과', () => {
     const fakeJwt = ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'abcdefghijklmnop'].join('.');
