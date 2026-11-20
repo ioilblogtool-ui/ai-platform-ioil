@@ -28,6 +28,10 @@ router.post('/', requireAuth, async (req, res) => {
   if (!message || !message.trim()) {
     return res.status(400).json({ error: '메시지를 입력해주세요.' });
   }
+  // conversations.project_id는 NOT NULL이다 (supabase/schema.sql). 새 대화는 프로젝트가 있어야 만들 수 있다
+  if (!conversation_id && !project_id) {
+    return res.status(400).json({ error: '프로젝트를 선택한 뒤 대화를 시작해주세요.', code: 'PROJECT_REQUIRED' });
+  }
 
   try {
     // 1. 대화 ID가 없으면 새 대화 생성
@@ -36,22 +40,20 @@ router.post('/', requireAuth, async (req, res) => {
 
     if (!convId) {
       // 프로젝트의 시스템 프롬프트 가져오기
-      if (project_id) {
-        const { data: project, error: projectError } = await supabase
-          .from('projects')
-          .select('system_prompt')
-          .eq('id', project_id)
-          .eq('user_id', userId)
-          .maybeSingle();
-        if (projectError) throw projectError;
-        if (!project) return res.status(404).json({ error: '프로젝트를 찾을 수 없습니다.' });
-        if (project.system_prompt) systemPrompt = project.system_prompt;
-      }
+      const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .select('system_prompt')
+        .eq('id', project_id)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (projectError) throw projectError;
+      if (!project) return res.status(404).json({ error: '프로젝트를 찾을 수 없습니다.' });
+      if (project.system_prompt) systemPrompt = project.system_prompt;
 
       const { data: newConv, error: convError } = await supabase
         .from('conversations')
         .insert({
-          project_id: project_id || null,
+          project_id,
           user_id: userId,
           title: message.slice(0, 50) + (message.length > 50 ? '...' : ''),
         })

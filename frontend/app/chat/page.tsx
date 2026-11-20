@@ -96,8 +96,11 @@ export default function Dashboard() {
     try { setMessages(await getMessages(convId)); } catch {}
   }
 
+  // 새 대화는 프로젝트가 있어야 만들 수 있다 (conversations.project_id NOT NULL)
+  const needsProject = !activeConvId && !activeProjectId;
+
   async function handleSend() {
-    if (!input.trim() || loading) return;
+    if (!input.trim() || loading || needsProject) return;
     const text = input.trim();
     setInput('');
     setLoading(true);
@@ -345,6 +348,11 @@ export default function Dashboard() {
 
           {/* 입력창 */}
           <div style={{ padding: '14px 24px 18px', borderTop: '1px solid rgba(255,255,255,0.07)', background: '#161618' }}>
+            {needsProject && (
+              <div role="status" style={{ fontSize: 12, color: '#c8a96e', marginBottom: 8 }}>
+                왼쪽에서 프로젝트를 선택하거나 새로 만든 뒤 대화를 시작하세요.
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
               <textarea
                 value={input}
@@ -359,11 +367,11 @@ export default function Dashboard() {
                   minHeight: 44, maxHeight: 120,
                 }}
               />
-              <button onClick={handleSend} disabled={loading || !input.trim()} style={{
+              <button onClick={handleSend} disabled={loading || !input.trim() || needsProject} style={{
                 width: 44, height: 44, borderRadius: 10, border: 'none',
-                background: loading || !input.trim() ? '#2a2a2e' : '#c8a96e',
-                color: loading || !input.trim() ? '#555350' : '#1a1208',
-                fontSize: 18, cursor: loading || !input.trim() ? 'not-allowed' : 'pointer', flexShrink: 0,
+                background: loading || !input.trim() || needsProject ? '#2a2a2e' : '#c8a96e',
+                color: loading || !input.trim() || needsProject ? '#555350' : '#1a1208',
+                fontSize: 18, cursor: loading || !input.trim() || needsProject ? 'not-allowed' : 'pointer', flexShrink: 0,
               }}>↑</button>
             </div>
           </div>
