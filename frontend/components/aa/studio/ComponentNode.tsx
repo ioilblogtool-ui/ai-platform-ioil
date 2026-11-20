@@ -2,10 +2,10 @@
 
 // 캔버스 컴포넌트 노드 (04 §6.4). 테두리는 네 면 longhand로만 — 혼용 시 React 재렌더 경고 (Step 0 스파이크 발견 1)
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import type { AaFlowNode } from '@/lib/aa/graph-mapper';
+import type { AaComponentFlowNode } from '@/lib/aa/graph-mapper';
 import { CATEGORY_COLOR, TYPE_FALLBACK } from './palette-meta';
 
-export default function ComponentNode({ data, selected }: NodeProps<AaFlowNode>) {
+export default function ComponentNode({ data, selected }: NodeProps<AaComponentFlowNode>) {
   const meta = TYPE_FALLBACK[data.type] ?? { icon: '▭', category: 'application' };
   const color = CATEGORY_COLOR[meta.category] ?? 'rgba(255,255,255,0.4)';
   const edge = selected ? '#c8a96e' : 'rgba(255,255,255,0.12)';

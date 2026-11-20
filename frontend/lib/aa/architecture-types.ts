@@ -63,7 +63,8 @@ export interface ViewNode {
   position: { x: number; y: number };
   width?: number;
   height?: number;
-  text?: string;                // note 전용
+  label?: string;               // group 전용 (≤120자)
+  text?: string;                // note 전용 (1~2,000자)
 }
 
 export interface ViewEdge {
@@ -119,13 +120,32 @@ export interface SaveDraftResult {
   warnings: ValidationIssue[];
 }
 
+export type PropertyType = 'string' | 'text' | 'number' | 'boolean' | 'enum' | 'list';
+
+/** 타입 레지스트리 속성 정의 (backend/lib/aa/type-registry.json) */
+export interface PropertyDef {
+  key: string;
+  label: string;
+  type: PropertyType;
+  default?: unknown;
+  options?: string[];
+  min?: number;
+  max?: number;
+  integer?: boolean;
+  pattern?: string;
+  placeholder?: string;
+}
+
+export interface TypeDef {
+  label: string; category: string; layer: ComponentLayer; icon: string;
+  nodeKind: NodeKind; views: ViewKind[]; aliases?: string[]; properties: PropertyDef[];
+}
+
 export interface TypeRegistry {
   version: number;
   categories: { key: string; label: string }[];
-  types: Record<string, {
-    label: string; category: string; layer: ComponentLayer; icon: string;
-    nodeKind: NodeKind; views: ViewKind[]; properties: unknown[];
-  }>;
+  propertyTypes?: PropertyType[];
+  types: Record<string, TypeDef>;
 }
 
 export interface ListProjectsParams {
