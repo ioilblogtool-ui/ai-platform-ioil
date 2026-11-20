@@ -9,6 +9,7 @@
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"test/**/*.test.mjs\""
   },
   "dependencies": {
+    "@dagrejs/dagre": "^1.1.8",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "^2.43.0",
     "@types/marked": "^6.0.0",
