@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const requestLog = require('./middleware/requestLog');
 
 const chatRoutes = require('./routes/chat');
 const conversationRoutes = require('./routes/conversations');
@@ -32,6 +33,7 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // 미들웨어
+app.use(requestLog);
 app.use(cors({
   origin: [
     'http://localhost:3000',
