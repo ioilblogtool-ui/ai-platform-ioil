@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "categories": [
+    { "key": "application", "label": "Application" },
+    { "key": "data", "label": "Data" },
+    { "key": "general", "label": "General" }
+  ],
+  "types": {
+    "client":   { "label": "Client",   "category": "application", "layer": "logical", "icon": "▭", "nodeKind": "component", "views": ["logical"], "properties": [] },
+    "gateway":  { "label": "Gateway",  "category": "application", "layer": "logical", "icon": "⇲", "nodeKind": "component", "views": ["logical"], "properties": [] },
+    "service":  { "label": "Service",  "category": "application", "layer": "logical", "icon": "⬢", "nodeKind": "component", "views": ["logical"], "properties": [] },
+    "worker":   { "label": "Worker",   "category": "application", "layer": "logical", "icon": "⚙", "nodeKind": "component", "views": ["logical"], "properties": [] },
+    "external": { "label": "External", "category": "application", "layer": "logical", "icon": "◌", "nodeKind": "component", "views": ["logical"], "properties": [] },
+    "database": { "label": "Database", "category": "data",        "layer": "logical", "icon": "◫", "nodeKind": "component", "views": ["logical"], "properties": [] },
+    "cache":    { "label": "Cache",    "category": "data",        "layer": "logical", "icon": "⚡", "nodeKind": "component", "views": ["logical"], "properties": [] },
+    "queue":    { "label": "Queue",    "category": "data",        "layer": "logical", "icon": "☰", "nodeKind": "component", "views": ["logical"], "properties": [] },
+    "storage":  { "label": "Storage",  "category": "data",        "layer": "logical", "icon": "▥", "nodeKind": "component", "views": ["logical"], "properties": [] },
+    "group":    { "label": "Boundary", "category": "general",     "layer": "general", "icon": "⬚", "nodeKind": "group",     "views": ["logical"], "properties": [] },
+    "note":     { "label": "Note",     "category": "general",     "layer": "general", "icon": "✎", "nodeKind": "note",      "views": ["logical"], "properties": [] }
+  }
+}

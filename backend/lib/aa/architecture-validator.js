@@ -1,0 +1,152 @@
+// 아키텍처 모델 저장 전 검증 (03 데이터 모델 §2.2)
+// Sprint 1: V1~V5, V7(경고), V8, V12. V6(타입 레지스트리 속성 검증)은 Sprint 2.
+const { scanForSecrets } = require('./sensitive-scan');
+
+const MODEL_MAX_BYTES = 1024 * 1024;   // V8: 모델 1MB
+const MODEL_MAX_COMPONENTS = 500;      // V8: 컴포넌트 500개
+const MAX_ERRORS = 50;
+
+const ID_RE = {
+  component: /^cmp_[A-Za-z0-9_-]{1,64}$/,
+  relation:  /^rel_[A-Za-z0-9_-]{1,64}$/,
+  view:      /^view_[A-Za-z0-9_-]{1,64}$/,
+  node:      /^nd_[A-Za-z0-9_-]{1,64}$/,
+  edge:      /^ed_[A-Za-z0-9_-]{1,64}$/,
+};
+const RELATION_TYPES = new Set(['calls', 'realizes', 'depends_on']);
+const NODE_KINDS = new Set(['component', 'group', 'note']);
+const VIEW_KINDS = new Set(['logical', 'deployment', 'kubernetes', 'aws', 'apiflow']);
+
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isFiniteNum = (v) => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * @returns {{ errors: {rule,path,message}[], warnings: {rule,path,message}[], tooLarge: null | {bytes,components} }}
+ */
+function validateModel(model) {
+  const errors = [];
+  const warnings = [];
+  const err = (rule, path, message) => { if (errors.length < MAX_ERRORS) errors.push({ rule, path, message }); };
+
+  // 기본 구조
+  if (!isObj(model)) return { errors: [{ rule: 'STRUCTURE', path: '(root)', message: 'model은 객체여야 합니다.' }], warnings, tooLarge: null };
+
+  // V8: 크기 (구조 검사보다 먼저 — 큰 모델을 끝까지 돌지 않음)
+  const bytes = Buffer.byteLength(JSON.stringify(model), 'utf8');
+  const componentCount = isObj(model.components) ? Object.keys(model.components).length : 0;
+  if (bytes > MODEL_MAX_BYTES || componentCount > MODEL_MAX_COMPONENTS) {
+    return { errors, warnings, tooLarge: { bytes, limit: MODEL_MAX_BYTES, components: componentCount, componentLimit: MODEL_MAX_COMPONENTS } };
+  }
+
+  if (!Number.isInteger(model.schemaVersion)) err('STRUCTURE', 'schemaVersion', 'schemaVersion은 정수여야 합니다.');
+  if (!isObj(model.components)) err('STRUCTURE', 'components', 'components는 객체여야 합니다.');
+  if (!isObj(model.relations)) err('STRUCTURE', 'relations', 'relations는 객체여야 합니다.');
+  if (!Array.isArray(model.views)) err('STRUCTURE', 'views', 'views는 배열이어야 합니다.');
+  if (model.flows !== undefined && !isObj(model.flows)) err('STRUCTURE', 'flows', 'flows는 객체여야 합니다.');
+  if (errors.length) return { errors, warnings, tooLarge: null };
+
+  // V1: id 형식·유일성 (모델 전체)
+  const seen = new Set();
+  const claim = (id, path) => {
+    if (seen.has(id)) err('V1', path, `id가 중복됩니다: ${id}`);
+    seen.add(id);
+  };
+
+  const components = model.components;
+  for (const [key, c] of Object.entries(components)) {
+    const p = `components.${key}`;
+    if (!isObj(c)) { err('STRUCTURE', p, '컴포넌트는 객체여야 합니다.'); continue; }
+    if (c.id !== key) err('V1', `${p}.id`, 'components의 키와 id가 같아야 합니다.');
+    if (!ID_RE.component.test(key)) err('V1', p, '컴포넌트 id는 cmp_ 로 시작해야 합니다.');
+    claim(key, p);
+    if (typeof c.type !== 'string' || !c.type) err('STRUCTURE', `${p}.type`, 'type이 필요합니다.');
+    if (typeof c.name !== 'string' || !c.name.trim() || c.name.length > 120) err('STRUCTURE', `${p}.name`, 'name은 1~120자 문자열이어야 합니다.');
+    if (c.properties !== undefined && !isObj(c.properties)) err('STRUCTURE', `${p}.properties`, 'properties는 객체여야 합니다.');
+    if (c.requirementIds !== undefined && !Array.isArray(c.requirementIds)) err('STRUCTURE', `${p}.requirementIds`, 'requirementIds는 배열이어야 합니다.');
+  }
+
+  // V2: 관계 끝점
+  const relations = model.relations;
+  for (const [key, r] of Object.entries(relations)) {
+    const p = `relations.${key}`;
+    if (!isObj(r)) { err('STRUCTURE', p, '관계는 객체여야 합니다.'); continue; }
+    if (r.id !== key) err('V1', `${p}.id`, 'relations의 키와 id가 같아야 합니다.');
+    if (!ID_RE.relation.test(key)) err('V1', p, '관계 id는 rel_ 로 시작해야 합니다.');
+    claim(key, p);
+    if (!RELATION_TYPES.has(r.type)) err('V2', `${p}.type`, `지원하지 않는 관계 유형입니다: ${r.type}`);
+    if (!Object.prototype.hasOwnProperty.call(components, r.from)) err('V2', `${p}.from`, `존재하지 않는 컴포넌트입니다: ${r.from}`);
+    if (!Object.prototype.hasOwnProperty.call(components, r.to)) err('V2', `${p}.to`, `존재하지 않는 컴포넌트입니다: ${r.to}`);
+  }
+
+  // 뷰·노드·엣지
+  const componentsWithNode = new Set();
+  model.views.forEach((v, vi) => {
+    const vp = `views[${vi}]`;
+    if (!isObj(v)) { err('STRUCTURE', vp, 'view는 객체여야 합니다.'); return; }
+    if (!ID_RE.view.test(String(v.id))) err('V1', `${vp}.id`, 'view id는 view_ 로 시작해야 합니다.');
+    else claim(v.id, `${vp}.id`);
+    if (!VIEW_KINDS.has(v.kind)) err('STRUCTURE', `${vp}.kind`, `지원하지 않는 view 종류입니다: ${v.kind}`);
+    if (!Array.isArray(v.nodes) || !Array.isArray(v.edges)) { err('STRUCTURE', vp, 'nodes와 edges는 배열이어야 합니다.'); return; }
+
+    const nodesById = new Map();
+    const componentNodeInView = new Map();
+    v.nodes.forEach((n, ni) => {
+      const np = `${vp}.nodes[${ni}]`;
+      if (!isObj(n)) { err('STRUCTURE', np, '노드는 객체여야 합니다.'); return; }
+      if (!ID_RE.node.test(String(n.id))) err('V1', `${np}.id`, '노드 id는 nd_ 로 시작해야 합니다.');
+      else claim(n.id, `${np}.id`);
+      nodesById.set(n.id, n);
+      if (!NODE_KINDS.has(n.kind)) err('STRUCTURE', `${np}.kind`, `지원하지 않는 노드 종류입니다: ${n.kind}`);
+      if (!isObj(n.position) || !isFiniteNum(n.position.x) || !isFiniteNum(n.position.y)) err('STRUCTURE', `${np}.position`, 'position.x, position.y는 숫자여야 합니다.');
+      // V3: 노드 → 컴포넌트
+      if (n.componentId !== undefined && n.componentId !== null) {
+        if (!Object.prototype.hasOwnProperty.call(components, n.componentId)) err('V3', `${np}.componentId`, `존재하지 않는 컴포넌트입니다: ${n.componentId}`);
+        else if (componentNodeInView.has(n.componentId)) err('V3', `${np}.componentId`, '한 View에 같은 컴포넌트의 노드는 하나만 둘 수 있습니다.');
+        else { componentNodeInView.set(n.componentId, n.id); componentsWithNode.add(n.componentId); }
+      } else if (n.kind === 'component') {
+        err('V3', `${np}.componentId`, 'component 노드에는 componentId가 필요합니다.');
+      }
+    });
+
+    // V5: parentId = 같은 View의 group 노드, 순환 없음
+    for (const n of nodesById.values()) {
+      if (n.parentId === undefined || n.parentId === null) continue;
+      const parent = nodesById.get(n.parentId);
+      if (!parent || parent.kind !== 'group') { err('V5', `${vp}.nodes(${n.id}).parentId`, 'parentId는 같은 View의 group 노드여야 합니다.'); continue; }
+      const visited = new Set([n.id]);
+      let cur = parent;
+      while (cur) {
+        if (visited.has(cur.id)) { err('V5', `${vp}.nodes(${n.id}).parentId`, 'parentId에 순환이 있습니다.'); break; }
+        visited.add(cur.id);
+        cur = cur.parentId ? nodesById.get(cur.parentId) : null;
+      }
+    }
+
+    // V4: 엣지 → 관계, 양 끝 컴포넌트의 노드가 이 View에 있어야 함
+    v.edges.forEach((e, ei) => {
+      const ep = `${vp}.edges[${ei}]`;
+      if (!isObj(e)) { err('STRUCTURE', ep, '엣지는 객체여야 합니다.'); return; }
+      if (!ID_RE.edge.test(String(e.id))) err('V1', `${ep}.id`, '엣지 id는 ed_ 로 시작해야 합니다.');
+      else claim(e.id, `${ep}.id`);
+      const rel = Object.prototype.hasOwnProperty.call(relations, e.relationId) ? relations[e.relationId] : null;
+      if (!rel) { err('V4', `${ep}.relationId`, `존재하지 않는 관계입니다: ${e.relationId}`); return; }
+      if (!componentNodeInView.has(rel.from) || !componentNodeInView.has(rel.to)) {
+        err('V4', `${ep}.relationId`, '관계 양 끝 컴포넌트의 노드가 이 View에 있어야 합니다.');
+      }
+    });
+  });
+
+  // V7: 어느 View에도 노드가 없는 컴포넌트 → 경고
+  for (const id of Object.keys(components)) {
+    if (!componentsWithNode.has(id)) warnings.push({ rule: 'V7', path: `components.${id}`, message: '어느 View에도 표시되지 않는 컴포넌트입니다.' });
+  }
+
+  // V12: 키·토큰·PEM이 들어 있으면 저장 거부
+  for (const hit of scanForSecrets(model)) {
+    err('V12', hit.path, `민감정보로 보이는 값이 있어 저장할 수 없습니다 (${hit.rule}: ${hit.sample}).`);
+  }
+
+  return { errors, warnings, tooLarge: null };
+}
+
+module.exports = { validateModel, MODEL_MAX_BYTES, MODEL_MAX_COMPONENTS };
