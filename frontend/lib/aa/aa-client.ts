@@ -5,7 +5,8 @@
 // AA는 { status, code, details }를 보존하는 전용 래퍼를 쓴다 (409 충돌 처리에 currentRevision 필요).
 import type {
   AaProject, AaProjectDetail, AaProjectSummary, ArchitectureModel, DraftResponse,
-  ListProjectsParams, ProjectStatus, SaveDraftResult, TypeRegistry, ValidationIssue,
+  ListProjectsParams, ListRequirementsParams, ProjectStatus, Requirement, RequirementCreate,
+  RequirementUpdate, SaveDraftResult, TypeRegistry, ValidationIssue,
 } from './architecture-types';
 
 export class AaApiError extends Error {
@@ -97,6 +98,24 @@ export function createAaClient(deps: AaClientDeps) {
     },
     async deleteProject(projectId: string, confirmName: string) {
       await request<void>(`${p(projectId)}${deps.buildQuery({ confirm: confirmName })}`, { method: 'DELETE' });
+    },
+
+    // ── 요구사항 ──
+    listRequirements(projectId: string, params?: ListRequirementsParams) {
+      return request<{ data: Requirement[]; total: number }>(
+        `${p(projectId)}/requirements${deps.buildQuery({ ...params })}`,
+      );
+    },
+    async createRequirement(projectId: string, input: RequirementCreate) {
+      return (await request<{ data: Requirement }>(`${p(projectId)}/requirements`, json('POST', input))).data;
+    },
+    async updateRequirement(projectId: string, id: string, patch: RequirementUpdate) {
+      return (await request<{ data: Requirement }>(
+        `${p(projectId)}/requirements/${encodeURIComponent(id)}`, json('PATCH', patch),
+      )).data;
+    },
+    async deleteRequirement(projectId: string, id: string) {
+      await request<void>(`${p(projectId)}/requirements/${encodeURIComponent(id)}`, json('DELETE'));
     },
 
     // ── Draft ──

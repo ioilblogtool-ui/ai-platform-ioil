@@ -112,6 +112,8 @@ export interface ValidationIssue {
   rule: string;
   path: string;
   message: string;
+  /** V9 경고: 현재 프로젝트에서 찾지 못해 저장 시 제외한 요구사항 ID */
+  removedIds?: string[];
 }
 
 export interface SaveDraftResult {
@@ -146,6 +148,36 @@ export interface TypeRegistry {
   categories: { key: string; label: string }[];
   propertyTypes?: PropertyType[];
   types: Record<string, TypeDef>;
+}
+
+export type RequirementKind = 'fr' | 'nfr';
+export type RequirementStatus = 'active' | 'deprecated';
+export type RequirementPriority = 'must' | 'should' | 'could';
+export type RequirementCategory =
+  | 'availability' | 'performance' | 'scalability' | 'security' | 'operability' | 'cost' | 'other';
+
+export interface Requirement {
+  id: string;
+  code: string;
+  kind: RequirementKind;
+  title: string;
+  category: RequirementCategory | null;
+  description: string | null;
+  target: string | null;
+  metric: string | null;
+  priority: RequirementPriority;
+  status: RequirementStatus;
+  sortOrder: number;
+}
+
+export type RequirementUpdate = Partial<Omit<Requirement, 'id' | 'code' | 'kind'>>;
+export type RequirementCreate = RequirementUpdate & Pick<Requirement, 'kind' | 'title'>;
+export interface ListRequirementsParams {
+  kind?: RequirementKind;
+  category?: RequirementCategory;
+  status?: RequirementStatus;
+  limit?: number;
+  offset?: number;
 }
 
 export interface ListProjectsParams {

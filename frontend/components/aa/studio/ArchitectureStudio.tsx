@@ -187,6 +187,9 @@ function Studio({ projectId }: { projectId: string }) {
         <button onClick={() => router.push('/aa/projects')} title="프로젝트 목록" style={btn(true)}>◀</button>
         <button onClick={() => setPaletteOpen((v) => !v)} title="팔레트 접기·펴기 ([)" style={btn(true)}>☰</button>
         <b style={{ fontSize: 13.5 }}>{s.projectName || '…'}</b>
+        <button onClick={() => router.push(`/aa/projects/${projectId}/requirements`)} style={btn()}>
+          요구사항
+        </button>
         <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }} data-testid="aa-revision">Draft · rev {s.baseRevision || '–'}</span>
         <div style={{ flex: 1 }} />
         {bytes > MODEL_WARN_BYTES && <span style={{ fontSize: 12, color: '#f5a524' }}>설계 크기 {Math.round(bytes / 1024)}KB (한도 1MB)</span>}

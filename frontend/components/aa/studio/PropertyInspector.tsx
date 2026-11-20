@@ -116,7 +116,65 @@ function ComponentEditor({ component, definitions, edits }: { component: Compone
           onChange={(key, raw) => s.updateComponentProperty(component.id, key, raw)} edits={edits} />
       </>}
       <CustomProperties component={component} definitions={definitions} />
+      <RequirementLinks target="components" id={component.id} linked={component.requirementIds} />
     </div>
+  );
+}
+
+const kindLabel = { fr: 'FR', nfr: 'NFR' } as const;
+
+// 컴포넌트·관계의 FR/NFR 연결. 후보는 현재 프로젝트 요구사항만, 새로 붙일 수 있는 건 active만.
+// 이미 연결된 deprecated 항목과 목록에 없는 ID는 표시하고 해제만 할 수 있다.
+function RequirementLinks({ target, id, linked }: { target: 'components' | 'relations'; id: string; linked?: string[] }) {
+  const requirements = useStudio((s) => s.requirements);
+  const error = useStudio((s) => s.requirementsError);
+  const setLink = useStudio((s) => s.setRequirementLink);
+  const reload = useStudio((s) => s.loadRequirements);
+  const [choice, setChoice] = useState('');
+  const ids = Array.isArray(linked) ? linked : [];
+  const byId = new Map(requirements.map((entry) => [entry.id, entry]));
+  const candidates = requirements.filter((entry) => entry.status === 'active' && !ids.includes(entry.id));
+
+  return (
+    <section style={{ display: 'grid', gap: 7 }} aria-label="연결된 요구사항" data-testid="aa-requirement-links">
+      <strong>요구사항 ({ids.length})</strong>
+      {ids.length === 0 && <span style={muted}>연결된 FR·NFR이 없습니다.</span>}
+      {ids.map((reqId) => {
+        const entry = byId.get(reqId);
+        return (
+          <div key={reqId} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 12.5 }}>
+              {entry ? <>
+                <b style={{ color: entry.kind === 'nfr' ? '#c8a96e' : '#9ec5ff' }}>{entry.code}</b> {entry.title}
+                {entry.status === 'deprecated' && <span style={{ ...muted, marginLeft: 6 }}>사용 중단</span>}
+              </> : <span style={muted}>{requirements.length || error ? '찾을 수 없는 요구사항 — 저장하면 제외됩니다' : '불러오는 중…'}</span>}
+            </span>
+            <button style={button} aria-label={`${entry?.code ?? reqId} 연결 해제`} onClick={() => setLink(target, id, reqId, false)}>해제</button>
+          </div>
+        );
+      })}
+      {error ? (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ ...muted, color: '#ff9b9d', marginTop: 0 }} role="alert">요구사항을 불러오지 못했습니다.</span>
+          <button style={button} onClick={() => { void reload(); }}>다시 시도</button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 6 }}>
+          <select style={{ ...fieldStyle, flex: 1, minWidth: 0 }} value={choice} aria-label="연결할 요구사항"
+            onChange={(event) => setChoice(event.target.value)} disabled={!candidates.length}>
+            <option value="">{candidates.length ? '요구사항 선택…' : '연결할 수 있는 활성 요구사항이 없습니다'}</option>
+            {candidates.map((entry) => (
+              <option key={entry.id} value={entry.id}>{entry.code} · {kindLabel[entry.kind]} · {entry.title}</option>
+            ))}
+          </select>
+          <button style={button} disabled={!choice} onClick={() => {
+            if (!choice) return;
+            setLink(target, id, choice, true);
+            setChoice('');
+          }}>연결</button>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -173,6 +231,7 @@ function RelationEditor({ relation, edits }: { relation: Relation; edits: Inspec
           validate={(value) => relationFieldError(field, value)}
           onCommit={(value) => update(relation.id, field, value)} edits={edits} />
       ))}
+      <RequirementLinks target="relations" id={relation.id} linked={relation.requirementIds} />
     </div>
   );
 }

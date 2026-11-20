@@ -10,9 +10,12 @@ const { validateModel } = require('../../lib/aa/architecture-validator');
 const { scanForSecrets } = require('../../lib/aa/sensitive-scan');
 const { emptyModel, README_TEMPLATE } = require('../../lib/aa/empty-model');
 
+const { reconcile } = require('../../lib/aa/requirement-refs');
+
 const router = express.Router();
 router.use(requireAuth);
 router.param('projectId', loadProject);
+router.use('/:projectId/requirements', require('./requirements'));
 
 const README_MAX_BYTES = 64 * 1024;
 const DESCRIPTION_MAX = 2000;
@@ -197,7 +200,8 @@ router.get('/:projectId/architecture', wrap(async (req, res) => {
     .maybeSingle();
   if (error) throw error;
   if (!data) return sendError(res, 404, 'NOT_FOUND', 'Draft를 찾을 수 없습니다.');
-  res.json({ data: { model: data.model, revision: data.revision, baseVersion: null, updatedAt: data.updated_at } });
+  const { model, warnings } = await reconcile(supabase, req.project.id, req.user.id, data.model);
+  res.json({ data: { model, revision: data.revision, baseVersion: null, updatedAt: data.updated_at }, ...(warnings.length ? { warnings } : {}) });
 }));
 
 // ── Draft 저장 (낙관적 잠금) ──────────────────────────────────
@@ -218,11 +222,12 @@ router.put('/:projectId/architecture/draft', wrap(async (req, res) => {
     return sendError(res, 400, 'VALIDATION_FAILED', '설계 모델 검증에 실패했습니다.', errors);
   }
 
+  const reconciled = await reconcile(supabase, req.project.id, req.user.id, model);
   const { data, error } = await supabase.rpc('aa_save_draft', {
     p_project: req.project.id,
     p_user: req.user.id,
     p_base_revision: baseRevision,
-    p_model: model,
+    p_model: reconciled.model,
   });
   if (error) throw error;
   if (data?.not_found) return sendError(res, 404, 'NOT_FOUND', 'Draft를 찾을 수 없습니다.');
@@ -232,7 +237,7 @@ router.put('/:projectId/architecture/draft', wrap(async (req, res) => {
       updatedAt: data.updated_at,
     });
   }
-  res.json({ data: { revision: data.revision, updatedAt: data.updated_at }, warnings });
+  res.json({ data: { revision: data.revision, updatedAt: data.updated_at }, warnings: [...warnings, ...reconciled.warnings] });
 }));
 
 module.exports = router;

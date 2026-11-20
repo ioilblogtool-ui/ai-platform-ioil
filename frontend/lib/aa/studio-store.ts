@@ -4,8 +4,8 @@
 // 모델 변경은 model-ops를 사용한다. 자동 저장과 수동 저장은 같은 revision 경로를 거친다.
 import { create } from 'zustand';
 import type { Connection, EdgeChange, NodeChange } from '@xyflow/react';
-import type { ArchitectureModel, TypeRegistry } from './architecture-types';
-import { getAaProject, getDraft, getTypeRegistry, saveDraft, AaApiError, RevisionConflictError } from './architecture-api';
+import type { ArchitectureModel, Requirement, TypeRegistry } from './architecture-types';
+import { getAaProject, getDraft, getTypeRegistry, listRequirements, saveDraft, AaApiError, RevisionConflictError } from './architecture-api';
 import { newId } from './ids';
 import type { AaFlowNode } from './graph-mapper';
 import * as ops from './model-ops';
@@ -30,6 +30,9 @@ type StudioState = {
   conflictRevision: number | null;
   editSeq: number;                 // 편집할 때마다 증가 — 저장 중 추가 편집 감지
   registry: TypeRegistry | null;
+  /** 현재 프로젝트의 FR/NFR (Inspector 연결 후보). 조회에 실패해도 Studio는 열린다 */
+  requirements: Requirement[];
+  requirementsError: string | null;
   selectedNodeIds: string[];
   selectedEdgeIds: string[];
   pendingDelete: PendingDelete | null;
@@ -63,6 +66,8 @@ type StudioState = {
   updateComponentProperty: (id: string, key: string, raw: string) => void;
   updateCustomProperty: (id: string, previous: string | undefined, key: string, value?: string) => void;
   updateRelationField: (id: string, field: 'protocol' | 'mode' | 'label', value: string) => void;
+  setRequirementLink: (target: ops.RequirementTarget, id: string, requirementId: string, on: boolean) => void;
+  loadRequirements: () => Promise<void>;
   clearSelection: () => void;
   save: () => Promise<void>;
 };
@@ -137,6 +142,18 @@ export const useStudio = create<StudioState>((set, get) => {
       if (session !== currentSession) return;
       const edited = get().editSeq !== editSeq;
       retryUsed = false;
+      // V9: 서버는 현재 프로젝트에 없는 요구사항 참조를 빼고 저장했다. 로컬 모델에서도 그 참조만 정리한다.
+      // 저장 중 편집이 없었다면 정리된 모델이 서버 저장본과 같으므로 다시 저장하지 않는다.
+      // 편집이 있었다면 아래 dirty 경로가 정리된 최신 모델을 다시 저장한다.
+      const removals = res.warnings.filter((warning) => warning.removedIds?.length);
+      const current = get().model;
+      if (removals.length && current) {
+        const cleaned = ops.removeRequirementRefs(current, removals);
+        if (cleaned !== current) {
+          committedModel = cleaned;
+          set({ model: cleaned });
+        }
+      }
       set({
         baseRevision: res.revision,
         conflictRevision: null,
@@ -231,6 +248,8 @@ export const useStudio = create<StudioState>((set, get) => {
     conflictRevision: null,
     editSeq: 0,
     registry: null,
+    requirements: [],
+    requirementsError: null,
     selectedNodeIds: [],
     selectedEdgeIds: [],
     pendingDelete: null,
@@ -258,6 +277,7 @@ export const useStudio = create<StudioState>((set, get) => {
         projectId, saveState: 'loading', loadError: null, model: null,
         selectedNodeIds: [], selectedEdgeIds: [], pendingDelete: null,
         conflictRevision: null, saveMessage: null, backupMessage: null, recovery: null, reloading: false,
+        requirements: [], requirementsError: null,
       });
       try {
         await inFlight.get(projectId)?.catch(() => undefined);
@@ -283,6 +303,7 @@ export const useStudio = create<StudioState>((set, get) => {
           projectName: project.name, model: draft.model, baseRevision: draft.revision,
           registry, saveState: 'saved', editSeq: 0, recovery, backupMessage,
         });
+        void get().loadRequirements();
       } catch (error) {
         if (session !== currentSession) return;
         const message = error instanceof AaApiError && error.code === 'NOT_FOUND'
@@ -483,6 +504,25 @@ export const useStudio = create<StudioState>((set, get) => {
 
     updateRelationField(id, field, value) {
       edit((m) => ops.updateRelationField(m, id, field, value));
+    },
+
+    setRequirementLink(target, id, requirementId, on) {
+      edit((m) => ops.setRequirementLink(m, target, id, requirementId, on));
+    },
+
+    async loadRequirements() {
+      const { projectId } = get();
+      if (!projectId) return;
+      const currentSession = session;
+      try {
+        // 요구사항 API 한 페이지 최대치(200건)만 후보로 쓴다
+        const res = await listRequirements(projectId, { limit: 200 });
+        if (session !== currentSession) return;
+        set({ requirements: res.data, requirementsError: null });
+      } catch (error) {
+        if (session !== currentSession) return;
+        set({ requirementsError: (error as Error).message });
+      }
     },
 
     clearSelection() {

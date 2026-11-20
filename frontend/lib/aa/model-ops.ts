@@ -122,6 +122,36 @@ export function updateRelationField(model: ArchitectureModel, id: string, field:
   return { ...model, relations: { ...model.relations, [id]: updated } };
 }
 
+export type RequirementTarget = 'components' | 'relations';
+
+/** 컴포넌트·관계의 요구사항 연결(on=true)·해제(on=false). 이미 같은 상태면 입력 모델을 그대로 돌려준다 */
+export function setRequirementLink(model: ArchitectureModel, target: RequirementTarget, id: string, requirementId: string, on: boolean): ArchitectureModel {
+  const item = model[target][id];
+  if (!item || !requirementId) return model;
+  const current = Array.isArray(item.requirementIds) ? item.requirementIds : [];
+  const has = current.includes(requirementId);
+  if (has === on) return model;
+  const requirementIds = on ? [...current, requirementId] : current.filter((value) => value !== requirementId);
+  return { ...model, [target]: { ...model[target], [id]: { ...item, requirementIds } } };
+}
+
+/** 저장 응답의 V9 경고(현재 프로젝트에 없는 참조)를 반영해 해당 참조만 제거한다. 그 사이 추가한 편집은 유지한다 */
+export function removeRequirementRefs(model: ArchitectureModel, removals: { path: string; removedIds?: string[] }[]): ArchitectureModel {
+  let next = model;
+  for (const { path, removedIds } of removals) {
+    const match = /^(components|relations)\.([^.]+)\.requirementIds$/.exec(path);
+    if (!match || !removedIds?.length) continue;
+    const target = match[1] as RequirementTarget;
+    const item = next[target][match[2]];
+    if (!item || !Array.isArray(item.requirementIds)) continue;
+    const removed = new Set(removedIds.map((value) => value.toLowerCase()));
+    const requirementIds = item.requirementIds.filter((value) => !removed.has(value.toLowerCase()));
+    if (requirementIds.length === item.requirementIds.length) continue;
+    next = { ...next, [target]: { ...next[target], [match[2]]: { ...item, requirementIds } } };
+  }
+  return next;
+}
+
 export function getView(model: ArchitectureModel, viewId: string): View | undefined {
   return model.views.find((v) => v.id === viewId);
 }

@@ -2,6 +2,7 @@
 // V1~V6, V7(경고), V8, V12.
 // V6: 타입 레지스트리(type-registry.json — /api/aa/meta/types와 같은 원본) 기준 컴포넌트 타입·속성 검증.
 //     모든 속성은 선택 항목이다. 있는 키만 검사하고, 기본값을 채우거나 값을 바꾸지 않는다 (Sprint 1 저장본 호환).
+const { isUuid } = require('./requirement-refs');
 const { scanForSecrets } = require('./sensitive-scan');
 const REGISTRY = require('./type-registry.json');
 
@@ -61,6 +62,19 @@ function checkPropertyValue(def, value) {
 /**
  * @returns {{ errors: {rule,path,message}[], warnings: {rule,path,message}[], tooLarge: null | {bytes,components} }}
  */
+function checkRequirementIds(item, path, err) {
+  const { requirementIds } = item;
+  if (requirementIds === undefined) return;
+  const field = `${path}.requirementIds`;
+  if (!Array.isArray(requirementIds)) {
+    err('V9', field, 'requirementIds는 배열이어야 합니다.');
+    return;
+  }
+  requirementIds.forEach((id, index) => {
+    if (!isUuid(id)) err('V9', `${field}[${index}]`, '요구사항 ID는 UUID여야 합니다.');
+  });
+}
+
 function validateModel(model) {
   const errors = [];
   const warnings = [];
@@ -100,7 +114,7 @@ function validateModel(model) {
     if (typeof c.type !== 'string' || !c.type) err('STRUCTURE', `${p}.type`, 'type이 필요합니다.');
     if (typeof c.name !== 'string' || !c.name.trim() || c.name.length > 120) err('STRUCTURE', `${p}.name`, 'name은 1~120자 문자열이어야 합니다.');
     if (c.properties !== undefined && !isObj(c.properties)) err('STRUCTURE', `${p}.properties`, 'properties는 객체여야 합니다.');
-    if (c.requirementIds !== undefined && !Array.isArray(c.requirementIds)) err('STRUCTURE', `${p}.requirementIds`, 'requirementIds는 배열이어야 합니다.');
+    checkRequirementIds(c, p, err);
     if (c.custom !== undefined && !(isObj(c.custom) && Object.values(c.custom).every((v) => typeof v === 'string' && v.length <= STRING_MAX))) {
       err('STRUCTURE', `${p}.custom`, `custom은 ${STRING_MAX}자 이하 문자열 값의 객체여야 합니다.`);
     }
@@ -138,6 +152,7 @@ function validateModel(model) {
   for (const [key, r] of Object.entries(relations)) {
     const p = `relations.${key}`;
     if (!isObj(r)) { err('STRUCTURE', p, '관계는 객체여야 합니다.'); continue; }
+    checkRequirementIds(r, p, err);
     if (r.id !== key) err('V1', `${p}.id`, 'relations의 키와 id가 같아야 합니다.');
     if (!ID_RE.relation.test(key)) err('V1', p, '관계 id는 rel_ 로 시작해야 합니다.');
     claim(key, p);
