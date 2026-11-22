@@ -4,7 +4,7 @@
 // 모델 변경은 model-ops를 사용한다. 자동 저장과 수동 저장은 같은 revision 경로를 거친다.
 import { create } from 'zustand';
 import type { Connection, EdgeChange, NodeChange } from '@xyflow/react';
-import type { VersionRef, ArchitectureModel, Requirement, TypeRegistry } from './architecture-types';
+import type { ValidationIssue, VersionRef, ArchitectureModel, Requirement, TypeRegistry } from './architecture-types';
 import { getAaProject, getDraft, getTypeRegistry, listRequirements, modelByteSize, saveDraft, AaApiError, RevisionConflictError } from './architecture-api';
 import { newId } from './ids';
 import type { AaFlowNode } from './graph-mapper';
@@ -70,6 +70,22 @@ type StudioState = {
   updateCustomProperty: (id: string, previous: string | undefined, key: string, value?: string) => void;
   updateRelationField: (id: string, field: 'protocol' | 'mode' | 'label', value: string) => void;
   setRequirementLink: (target: ops.RequirementTarget, id: string, requirementId: string, on: boolean) => void;
+
+  // ── 배치안 (Sprint 7) ──
+  /** 서버가 돌려준 경고 중 V11(배치안의 Process 위치). 저장·조회 때마다 갱신 */
+  placementWarnings: ValidationIssue[];
+  /** 캔버스가 화면을 맞출 노드 (Inspector의 이동 버튼) */
+  focusNodeId: string | null;
+  setView: (viewId: string) => void;
+  /** 다른 View의 노드로 이동해 선택 (realizes 왕복) */
+  focusNode: (viewId: string, nodeId: string) => void;
+  /** 오류 문구를 돌려준다 (성공이면 null) */
+  addDeploymentView: (variant: string) => string | null;
+  duplicateDeploymentView: (variant: string) => string | null;
+  renameDeploymentView: (variant: string) => string | null;
+  removeDeploymentView: (viewId: string) => void;
+  setStrategy: (strategyMd: string) => void;
+  setRealizes: (fromId: string, toId: string, on: boolean) => void;
   loadRequirements: () => Promise<void>;
   clearSelection: () => void;
   save: () => Promise<void>;
@@ -183,6 +199,7 @@ export const useStudio = create<StudioState>((set, get) => {
         conflictRevision: null,
         saveState: edited ? 'dirty' : 'saved',
         saveMessage: res.warnings.length ? `경고 ${res.warnings.length}건` : null,
+          placementWarnings: res.warnings.filter((w) => w.rule === 'V11'),
       });
       if (edited) {
         backup();
@@ -271,6 +288,66 @@ export const useStudio = create<StudioState>((set, get) => {
     baseRevision: 0,
     baseVersion: null,
     setBaseVersion(v) { set({ baseVersion: v }); },
+    placementWarnings: [],
+    focusNodeId: null,
+
+    setView(viewId) {
+      const { model } = get();
+      if (!model || !model.views.some((v) => v.id === viewId) || get().viewId === viewId) return;
+      set({ viewId, selectedNodeIds: [], selectedEdgeIds: [], pendingDelete: null, focusNodeId: null });
+    },
+
+    focusNode(viewId, nodeId) {
+      const { model } = get();
+      if (!model?.views.some((v) => v.id === viewId && v.nodes.some((n) => n.id === nodeId))) return;
+      set({ viewId, selectedNodeIds: [nodeId], selectedEdgeIds: [], pendingDelete: null, focusNodeId: nodeId });
+    },
+
+    addDeploymentView(variant) {
+      let r: ReturnType<typeof ops.addDeploymentView> | null = null;
+      edit((m) => { r = ops.addDeploymentView(m, variant, newId); return r.model; });
+      const res = r as ReturnType<typeof ops.addDeploymentView> | null;
+      if (res?.viewId) set({ viewId: res.viewId, selectedNodeIds: [], selectedEdgeIds: [], focusNodeId: null });
+      return res?.error ?? null;
+    },
+
+    duplicateDeploymentView(variant) {
+      const { model, viewId } = get();
+      if (!model) return '설계를 불러오지 못했습니다.';
+      const r = ops.duplicateDeploymentView(model, viewId, variant, newId);
+      if (r.error || !r.viewId) return r.error ?? '복제하지 못했습니다.';
+      // V8: 복제로 모델이 한도를 넘으면 막는다
+      if (modelByteSize(r.model) > IMPORT_MAX_BYTES || Object.keys(r.model.components).length > IMPORT_MAX_COMPONENTS) {
+        return '복제하면 설계 크기 한도(1MB·컴포넌트 500개)를 넘습니다.';
+      }
+      edit(() => r.model);
+      set({ viewId: r.viewId, selectedNodeIds: [], selectedEdgeIds: [], focusNodeId: null });
+      return null;
+    },
+
+    renameDeploymentView(variant) {
+      let error: string | undefined;
+      edit((m, vid) => { const r = ops.renameDeploymentView(m, vid, variant); error = r.error; return r.model; });
+      return error ?? null;
+    },
+
+    removeDeploymentView(target) {
+      const changed = edit((m) => ops.removeDeploymentView(m, target));
+      if (!changed) return;
+      const { model, viewId } = get();
+      if (viewId === target) {
+        const next = model ? ops.deploymentViews(model)[0]?.id ?? 'view_logical' : 'view_logical';
+        set({ viewId: next, selectedNodeIds: [], selectedEdgeIds: [], focusNodeId: null });
+      }
+    },
+
+    setStrategy(strategyMd) {
+      edit((m, vid) => ops.setStrategy(m, vid, strategyMd));
+    },
+
+    setRealizes(fromId, toId, on) {
+      edit((m) => ops.setRealizes(m, get().registry, fromId, toId, on, newId));
+    },
     saveState: 'loading',
     saveMessage: null,
     conflictRevision: null,
@@ -331,6 +408,7 @@ export const useStudio = create<StudioState>((set, get) => {
         committedModel = draft.model;
         set({
           projectName: project.name, model: draft.model, baseRevision: draft.revision, baseVersion: draft.baseVersion,
+          viewId: 'view_logical', placementWarnings: (draft.warnings ?? []).filter((w) => w.rule === 'V11'), focusNodeId: null,
           registry, saveState: 'saved', editSeq: 0, recovery, backupMessage,
         });
         void get().loadRequirements();
@@ -377,6 +455,8 @@ export const useStudio = create<StudioState>((set, get) => {
         pausedForAuth = false;
         set({
           model: draft.model, baseRevision: draft.revision, baseVersion: draft.baseVersion, saveState: 'saved',
+          viewId: draft.model.views.some((v) => v.id === get().viewId) ? get().viewId : 'view_logical',
+          placementWarnings: (draft.warnings ?? []).filter((w) => w.rule === 'V11'),
           conflictRevision: null, reloading: false, selectedNodeIds: [], selectedEdgeIds: [],
           pendingDelete: null, editSeq: 0,
         });
@@ -398,8 +478,8 @@ export const useStudio = create<StudioState>((set, get) => {
       // 그룹 위에 놓았으면 그 그룹의 자식으로
       if (nodeId) {
         const { model, viewId } = get();
-        const g = model && ops.findDropGroup(model, viewId, position, nodeId);
-        if (g) edit((m, vid) => ops.setParent(m, vid, nodeId, g));
+        const g = model && ops.findDropGroup(model, viewId, position, nodeId, get().registry);
+        if (g) edit((m, vid) => ops.setParent(m, vid, nodeId, g, get().registry));
       }
     },
 
@@ -411,8 +491,8 @@ export const useStudio = create<StudioState>((set, get) => {
       const nodeId = addNode((m, vid) => ops.addNote(m, vid, position, '메모', newId));
       if (nodeId) {
         const { model, viewId } = get();
-        const g = model && ops.findDropGroup(model, viewId, position, nodeId);
-        if (g) edit((m, vid) => ops.setParent(m, vid, nodeId, g));
+        const g = model && ops.findDropGroup(model, viewId, position, nodeId, get().registry);
+        if (g) edit((m, vid) => ops.setParent(m, vid, nodeId, g, get().registry));
       }
     },
 
@@ -469,8 +549,8 @@ export const useStudio = create<StudioState>((set, get) => {
     reparentAt(nodeId, center) {
       const { model, viewId } = get();
       if (!model) return;
-      const target = ops.findDropGroup(model, viewId, center, nodeId);
-      edit((m, vid) => ops.setParent(m, vid, nodeId, target));
+      const target = ops.findDropGroup(model, viewId, center, nodeId, get().registry);
+      edit((m, vid) => ops.setParent(m, vid, nodeId, target, get().registry));
     },
 
     requestDelete(nodeIds, edgeIds) {
@@ -622,6 +702,7 @@ export const useStudio = create<StudioState>((set, get) => {
         set({
           model: built.model, baseRevision: res.revision, saveState: 'saved', conflictRevision: null,
           saveMessage: res.warnings.length ? `경고 ${res.warnings.length}건` : null,
+          placementWarnings: res.warnings.filter((w) => w.rule === 'V11'),
           importUndo: isImport ? { model: latest, revision: res.revision, summary: built.summary } : null,
           selectedNodeIds: [], selectedEdgeIds: [],
         });

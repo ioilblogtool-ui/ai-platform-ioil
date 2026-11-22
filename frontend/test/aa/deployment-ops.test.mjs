@@ -171,3 +171,32 @@ describe('배치안 복제·삭제', () => {
     assert.equal(removeDeploymentView(dup.model, 'view_logical'), dup.model, 'Logical cannot be removed');
   });
 });
+
+// Sprint 7 Step 2 — 캔버스 변환: 컨테이너는 'container' 노드, 자식은 parentId, V11 경고 표시
+import { toFlow } from '../../lib/aa/graph-mapper.ts';
+import { paletteItems } from '../../components/aa/studio/palette-meta.ts';
+
+describe('toFlow · palette for deployment views', () => {
+  it('renders containers as sized parent nodes and flags V11 warnings', () => {
+    const { model, viewId, plat, proc } = withPaas();
+    const flow = toFlow(model, viewId, new Set(), new Map([[proc.nodeId, 'Process는 VM 또는 Platform 안에 두세요.']]));
+    const c = flow.nodes.find((n) => n.id === plat.nodeId);
+    const p = flow.nodes.find((n) => n.id === proc.nodeId);
+    assert.equal(c.type, 'container');
+    assert.ok(c.width >= 80 && c.height >= 80);
+    assert.equal(p.type, 'component');
+    assert.equal(p.parentId, plat.nodeId);
+    assert.match(p.data.warning, /VM 또는 Platform/);
+    assert.ok(flow.nodes.indexOf(c) < flow.nodes.indexOf(p), 'parent before child');
+  });
+
+  it('shows deployment types only in deployment views (with and without registry)', () => {
+    const dep = paletteItems(REGISTRY, 'deployment').map((i) => i.type);
+    const logical = paletteItems(REGISTRY, 'logical').map((i) => i.type);
+    assert.ok(dep.includes('dep.process') && dep.includes('group') && dep.includes('note'));
+    assert.ok(!dep.includes('service'));
+    assert.ok(!logical.some((t) => t.startsWith('dep.')));
+    assert.ok(!paletteItems(null, 'logical').some((i) => i.type.startsWith('dep.')));
+    assert.ok(paletteItems(null, 'deployment').some((i) => i.type === 'dep.vm'));
+  });
+});

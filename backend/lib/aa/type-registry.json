@@ -85,12 +85,12 @@
       ]
     },
     "group": {
-      "label": "Boundary", "category": "general", "layer": "general", "icon": "⬚", "nodeKind": "group", "views": ["logical"],
+      "label": "Boundary", "category": "general", "layer": "general", "icon": "⬚", "nodeKind": "group", "views": ["logical", "deployment"],
       "aliases": ["group", "boundary", "zone"],
       "properties": []
     },
     "note": {
-      "label": "Note", "category": "general", "layer": "general", "icon": "✎", "nodeKind": "note", "views": ["logical"],
+      "label": "Note", "category": "general", "layer": "general", "icon": "✎", "nodeKind": "note", "views": ["logical", "deployment"],
       "aliases": ["memo", "comment"],
       "properties": []
     },

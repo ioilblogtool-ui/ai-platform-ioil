@@ -7,6 +7,12 @@ export const CATEGORY_COLOR: Record<string, string> = {
   data: '#4f9cf9',
   networking: '#a78bfa',
   general: 'rgba(255,255,255,0.4)',
+  deployment: '#5ec4b6',
+};
+
+// 배치안 신뢰 구역 색 (04 §6.10: external 회색 · dmz 보라 · internal teal · data 파랑)
+export const TRUST_COLOR: Record<string, string> = {
+  external: 'rgba(255,255,255,0.45)', dmz: '#a78bfa', internal: '#5ec4b6', data: '#4f9cf9',
 };
 
 export const TYPE_FALLBACK: Record<string, { icon: string; category: string }> = {
@@ -21,6 +27,15 @@ export const TYPE_FALLBACK: Record<string, { icon: string; category: string }> =
   storage: { icon: '▥', category: 'data' },
   group: { icon: '⬚', category: 'general' },
   note: { icon: '✎', category: 'general' },
+  // Sprint 7 배치안 (레지스트리 v3와 같은 아이콘)
+  'dep.environment': { icon: '▣', category: 'deployment' },
+  'dep.zone': { icon: '▦', category: 'deployment' },
+  'dep.platform': { icon: '☁', category: 'deployment' },
+  'dep.vm': { icon: '▭', category: 'deployment' },
+  'dep.lb': { icon: '⇋', category: 'deployment' },
+  'dep.managed_db': { icon: '⛁', category: 'deployment' },
+  'dep.managed_auth': { icon: '⚿', category: 'deployment' },
+  'dep.process': { icon: '⚙', category: 'deployment' },
 };
 
 export const DND_MIME = 'application/aa-type';
@@ -36,6 +51,8 @@ export function paletteItems(registry: TypeRegistry | null, viewKind: string, qu
   const out: PaletteItem[] = [];
   if (!registry) {
     for (const [type, f] of Object.entries(TYPE_FALLBACK)) {
+      // 레지스트리가 없을 때: 배치안 타입은 배치안에서만, 나머지는 Logical에서만
+      if (type.startsWith('dep.') !== (viewKind === 'deployment') && type !== 'group' && type !== 'note') continue;
       if (!q || type.includes(q)) out.push({ type, label: type, icon: f.icon, category: f.category, nodeKind: type === 'group' || type === 'note' ? type : 'component' });
     }
     return out;

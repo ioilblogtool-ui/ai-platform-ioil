@@ -107,6 +107,8 @@ export interface DraftResponse {
   revision: number;
   baseVersion: null | VersionRef;
   updatedAt: string;
+  /** V9·V11 경고 (Sprint 7: V11은 조회할 때마다 다시 계산) */
+  warnings?: ValidationIssue[];
 }
 
 // ── 버전 (Sprint 6) ──
@@ -144,6 +146,10 @@ export interface ValidationIssue {
   message: string;
   /** V9 경고: 현재 프로젝트에서 찾지 못해 저장 시 제외한 요구사항 ID */
   removedIds?: string[];
+  /** V11 경고(Sprint 7): 배치안의 Process 위치 */
+  code?: string;
+  viewId?: string;
+  nodeId?: string;
 }
 
 export interface SaveDraftResult {

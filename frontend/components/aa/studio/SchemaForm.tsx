@@ -19,13 +19,14 @@ type FieldProps = {
   value: string;
   placeholder?: string;
   multiline?: boolean;
+  rows?: number;
   choices?: string[];
   validate: (value: string) => string | undefined;
   onCommit: (value: string) => void;
   edits: InspectorEdits;
 };
 
-export function InspectorField({ label, value, placeholder, multiline, choices, validate, onCommit, edits }: FieldProps) {
+export function InspectorField({ label, value, placeholder, multiline, rows, choices, validate, onCommit, edits }: FieldProps) {
   const id = useId();
   const [draft, setDraft] = useState<string | null>(null);
   const error = draft === null ? undefined : validate(draft);
@@ -54,7 +55,7 @@ export function InspectorField({ label, value, placeholder, multiline, choices, 
           <option value="">미설정</option>
           {choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
         </select>
-      ) : multiline ? <textarea {...props} rows={5} /> : <input {...props} />}
+      ) : multiline ? <textarea {...props} rows={rows ?? 5} /> : <input {...props} />}
       {error && <span id={`${id}-error`} style={{ color: '#ff9b9d', fontSize: 12 }} role="alert">{error}</span>}
     </div>
   );

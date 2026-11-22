@@ -9,14 +9,22 @@ export type ComponentNodeData = {
   name: string;
   type: string;
   technology?: string;
+  /** V11 경고 (Sprint 7): 배치안의 Process가 VM·Platform 밖에 있음 */
+  warning?: string;
 };
+/** 배치안의 컨테이너 컴포넌트(환경·구역·플랫폼·VM) — 크기를 가진 component 노드 (Sprint 7) */
+export type ContainerNodeData = ComponentNodeData & { trust?: string; summary?: string };
 export type GroupNodeData = { label: string };
 export type NoteNodeData = { text: string };
 
 export type AaComponentFlowNode = Node<ComponentNodeData, 'component'>;
 export type AaGroupFlowNode = Node<GroupNodeData, 'group'>;
 export type AaNoteFlowNode = Node<NoteNodeData, 'note'>;
-export type AaFlowNode = AaComponentFlowNode | AaGroupFlowNode | AaNoteFlowNode;
+export type AaContainerFlowNode = Node<ContainerNodeData, 'container'>;
+export type AaFlowNode = AaComponentFlowNode | AaGroupFlowNode | AaNoteFlowNode | AaContainerFlowNode;
+
+/** 크기를 가진 노드 = 부모가 될 수 있는 노드 (group, 컨테이너 컴포넌트) */
+const isBox = (n: ViewNode) => n.kind === 'group' || (n.kind === 'component' && n.width !== undefined && n.height !== undefined);
 
 export type RelationEdgeData = { relationId: string; protocol?: string; label?: string; mode?: 'sync' | 'async' };
 export type AaFlowEdge = Edge<RelationEdgeData, 'relation'>;
@@ -43,7 +51,7 @@ export function sortParentsFirst(nodes: ViewNode[]): ViewNode[] {
   };
   // 같은 깊이에서는 그룹을 먼저 둔다 — React Flow는 배열 뒤쪽을 위에 그리므로, 나중에 만든 그룹이
   // 이미 있던 노드를 덮어 클릭·드래그를 가로채지 않게 한다 (Sprint 2 Step 4 발견)
-  const groupFirst = (n: ViewNode) => (n.kind === 'group' ? 0 : 1);
+  const groupFirst = (n: ViewNode) => (isBox(n) ? 0 : 1);
   return nodes
     .map((n, i) => ({ n, i, d: depthOf(n) }))
     .sort((a, b) => a.d - b.d || groupFirst(a.n) - groupFirst(b.n) || a.i - b.i)
@@ -51,11 +59,13 @@ export function sortParentsFirst(nodes: ViewNode[]): ViewNode[] {
 }
 
 /** 한 View의 노드·엣지를 React Flow 형태로 */
-export function toFlow(model: ArchitectureModel, viewId: string, selectedNodeIds: Set<string> = new Set()): { nodes: AaFlowNode[]; edges: AaFlowEdge[] } {
+export function toFlow(
+  model: ArchitectureModel, viewId: string, selectedNodeIds: Set<string> = new Set(), warnings: Map<string, string> = new Map(),
+): { nodes: AaFlowNode[]; edges: AaFlowEdge[] } {
   const view = getView(model, viewId);
   if (!view) return { nodes: [], edges: [] };
 
-  const groupIds = new Set(view.nodes.filter((n) => n.kind === 'group').map((n) => n.id));
+  const groupIds = new Set(view.nodes.filter(isBox).map((n) => n.id));
   const nodes: AaFlowNode[] = [];
   for (const n of sortParentsFirst(view.nodes)) {
     const base = {
@@ -67,7 +77,17 @@ export function toFlow(model: ArchitectureModel, viewId: string, selectedNodeIds
     if (n.kind === 'component') {
       const c: Component | undefined = n.componentId ? model.components[n.componentId] : undefined;
       if (!c) continue;
-      nodes.push({ ...base, type: 'component', data: { componentId: c.id, name: c.name, type: c.type, technology: c.technology } });
+      const data = { componentId: c.id, name: c.name, type: c.type, technology: c.technology, ...(warnings.has(n.id) ? { warning: warnings.get(n.id) } : {}) };
+      if (isBox(n)) {
+        const trust = typeof c.properties?.trust === 'string' ? (c.properties.trust as string) : undefined;
+        nodes.push({
+          ...base, type: 'container', data: { ...data, ...(trust ? { trust } : {}) },
+          width: n.width, height: n.height,
+          style: { width: n.width, height: n.height, padding: 0, background: 'transparent', borderStyle: 'none', borderRadius: 10, boxShadow: 'none' },
+        });
+      } else {
+        nodes.push({ ...base, type: 'component', data });
+      }
     } else if (n.kind === 'group') {
       nodes.push({
         ...base, type: 'group', data: { label: n.label ?? '' },

@@ -146,8 +146,10 @@ export function createAaClient(deps: AaClientDeps) {
     },
 
     // ── Draft ──
-    async getDraft(projectId: string) {
-      return (await request<{ data: DraftResponse }>(`${p(projectId)}/architecture`)).data;
+    /** 응답의 최상위 warnings(V9·V11)를 data에 붙여 돌려준다 (Sprint 7: V11은 조회 때마다 다시 계산) */
+    async getDraft(projectId: string): Promise<DraftResponse> {
+      const res = await request<{ data: DraftResponse; warnings?: ValidationIssue[] }>(`${p(projectId)}/architecture`);
+      return res.warnings?.length ? { ...res.data, warnings: res.warnings } : res.data;
     },
     /** 409이면 RevisionConflictError. force 같은 우회 옵션은 없다 (D-20). */
     async saveDraft(projectId: string, baseRevision: number, model: ArchitectureModel): Promise<SaveDraftResult> {

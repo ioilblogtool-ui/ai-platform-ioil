@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import MarkdownPreview from '@/components/MarkdownPreview';
 import type { Component, PropertyDef, Relation } from '@/lib/aa/architecture-types';
-import { componentTextError, customKeyError, PROTOCOLS, RELATION_MODES, relationFieldError } from '@/lib/aa/model-ops';
+import {
+  componentTextError, customKeyError, deploymentViewSummary, PROTOCOLS, RELATION_MODES, realizesTargets, relationFieldError, runLocations, STRATEGY_MAX_BYTES,
+} from '@/lib/aa/model-ops';
 import { useStudio } from '@/lib/aa/studio-store';
 import SchemaForm, { fieldStyle, InspectorField, type InspectorEdits } from './SchemaForm';
 
@@ -36,6 +38,11 @@ export default function PropertyInspector({ edits }: { edits: InspectorEdits }) 
       <strong>{definition?.label ?? component.type}</strong>
       <div style={mono}>{component.id}</div>
       <div style={muted}>위치 ({node.position.x}, {node.position.y}){node.parentId ? ' · 그룹 안 상대 좌표' : ''}</div>
+      {s.placementWarnings.some((w) => w.viewId === s.viewId && w.nodeId === node.id) && (
+        <div role="status" data-testid="aa-inspector-v11" style={{ ...muted, color: '#f5a524' }}>⚠ Process는 VM 또는 Platform 안에 두세요 (V11, 저장은 됨).</div>
+      )}
+      {definition?.realizes && <RealizesEditor componentId={component.id} />}
+      {component.layer === 'logical' && <RunLocations componentId={component.id} />}
       <ComponentEditor
         key={`${s.projectId}:${component.id}`}
         component={component} definitions={definition?.properties ?? []} edits={edits}
@@ -62,6 +69,8 @@ export default function PropertyInspector({ edits }: { edits: InspectorEdits }) 
       <div style={muted}>관계 유형: {relation.type}</div>
       {relation.type === 'calls' && <RelationEditor key={`${s.projectId}:${relation.id}`} relation={relation} edits={edits} />}
     </>;
+  } else if (view?.kind === 'deployment') {
+    body = <DeploymentSummary key={`${s.projectId}:${view.id}`} edits={edits} />;
   } else {
     const shown = new Set(s.model?.views.flatMap((entry) => entry.nodes.map((item) => item.componentId)));
     const orphanCount = Object.keys(s.model?.components ?? {}).filter((id) => !shown.has(id)).length;
@@ -232,6 +241,83 @@ function RelationEditor({ relation, edits }: { relation: Relation; edits: Inspec
           onCommit={(value) => update(relation.id, field, value)} edits={edits} />
       ))}
       <RequirementLinks target="relations" id={relation.id} linked={relation.requirementIds} />
+    </div>
+  );
+}
+
+// ── 배치안 (Sprint 7 · 04 §6.10 · VIEW-06) ─────────────────────────────────
+
+/** 구현체(Process·Managed DB·Managed Auth)의 구현 대상 Logical 컴포넌트 — 체크로 연결, 이름을 누르면 Logical View로 이동 */
+function RealizesEditor({ componentId }: { componentId: string }) {
+  const s = useStudio();
+  if (!s.model) return null;
+  const targets = new Set(realizesTargets(s.model, componentId));
+  const logical = Object.values(s.model.components).filter((c) => c.layer === 'logical').sort((a, b) => a.name.localeCompare(b.name));
+  const logicalView = s.model.views.find((v) => v.id === 'view_logical');
+  return (
+    <div style={{ ...fields, marginTop: 12 }} data-testid="aa-realizes">
+      <strong>구현 대상 (realizes)</strong>
+      {!logical.length && <span style={muted}>Logical 컴포넌트가 없습니다.</span>}
+      {logical.map((c) => {
+        const nodeId = logicalView?.nodes.find((n) => n.componentId === c.id)?.id;
+        return (
+          <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="checkbox" checked={targets.has(c.id)} aria-label={`${c.name} 구현`} data-testid="aa-realizes-toggle"
+              onChange={(e) => s.setRealizes(componentId, c.id, e.target.checked)} />
+            <span style={{ flex: 1 }}>{c.name}</span>
+            {targets.has(c.id) && nodeId && (
+              <button style={{ ...button, padding: '3px 8px' }} onClick={() => s.focusNode('view_logical', nodeId)} data-testid="aa-realizes-goto">Logical에서 보기</button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Logical 컴포넌트가 배치안마다 어디서 실행되는지 — 누르면 그 배치안의 구현체로 이동 */
+function RunLocations({ componentId }: { componentId: string }) {
+  const s = useStudio();
+  if (!s.model || !s.model.views.some((v) => v.kind === 'deployment')) return null;
+  const rows = runLocations(s.model, componentId);
+  return (
+    <div style={{ ...fields, marginTop: 12 }} data-testid="aa-run-locations">
+      <strong>배치안별 실행 위치</strong>
+      {!rows.length && <span style={muted}>어느 배치안에서도 구현하지 않았습니다.</span>}
+      {rows.map((r) => (
+        <button key={r.nodeId} style={{ ...button, textAlign: 'left' }} onClick={() => s.focusNode(r.viewId, r.nodeId)} data-testid="aa-run-location">
+          {r.variant} → {r.container ? `${r.container} / ` : ''}{r.implementer}{r.instances ? ` ×${r.instances}` : ''}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** 배치안에서 아무것도 선택하지 않았을 때: 요약과 배포 전략 Markdown (DEP-01) */
+function DeploymentSummary({ edits }: { edits: InspectorEdits }) {
+  const s = useStudio();
+  const [preview, setPreview] = useState(false);
+  const view = s.model?.views.find((v) => v.id === s.viewId);
+  if (!s.model || !view) return null;
+  const sum = deploymentViewSummary(s.model, view.id)!;
+  return (
+    <div data-testid="aa-deployment-summary">
+      <strong>{view.variant}</strong>
+      <div style={muted}>
+        배치안 · 컴포넌트 {sum.components} · 구현체 {sum.implementers} · 구현된 Logical {sum.realizedLogical}<br />
+        {sum.unrealizedLogical.length ? `아직 구현 안 된 Logical: ${sum.unrealizedLogical.join(', ')}` : '모든 Logical 컴포넌트가 이 배치안에서 구현됩니다.'}
+      </div>
+      <div style={{ ...fields }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <strong style={{ flex: 1 }}>배포 전략</strong>
+          <button style={button} aria-pressed={preview} onClick={() => { edits.flush(); setPreview(!preview); }}>{preview ? 'Markdown 편집' : '미리보기'}</button>
+        </div>
+        {preview
+          ? <div aria-label="배포 전략 미리보기">{view.strategyMd ? <MarkdownPreview content={view.strategyMd} /> : <span style={muted}>배포 전략이 비어 있습니다.</span>}</div>
+          : <InspectorField label="Markdown — 누가 승인하고, 무엇을 확인하며, 실패하면 어디까지 되돌리는지" value={view.strategyMd ?? ''} multiline rows={16}
+              validate={(v) => (new TextEncoder().encode(v).length > STRATEGY_MAX_BYTES ? '배포 전략은 64KB 이하여야 합니다.' : undefined)}
+              onCommit={(v) => s.setStrategy(v)} edits={edits} />}
+      </div>
     </div>
   );
 }

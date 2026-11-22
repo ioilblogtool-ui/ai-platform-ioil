@@ -8,11 +8,11 @@ import { CATEGORY_COLOR, TYPE_FALLBACK } from './palette-meta';
 export default function ComponentNode({ data, selected }: NodeProps<AaComponentFlowNode>) {
   const meta = TYPE_FALLBACK[data.type] ?? { icon: '▭', category: 'application' };
   const color = CATEGORY_COLOR[meta.category] ?? 'rgba(255,255,255,0.4)';
-  const edge = selected ? '#c8a96e' : 'rgba(255,255,255,0.12)';
+  const edge = selected ? '#c8a96e' : data.warning ? '#f5a524' : 'rgba(255,255,255,0.12)';
   const handle: React.CSSProperties = { width: 8, height: 8, background: '#c8a96e', borderStyle: 'solid', borderWidth: 2, borderColor: '#121215' };
 
   return (
-    <div data-testid="aa-node" style={{
+    <div data-testid="aa-node" title={data.warning} data-warning={data.warning ? 'V11' : undefined} style={{
       width: 168, minHeight: 56, boxSizing: 'border-box', padding: '9px 10px 9px 12px', borderRadius: 9, background: '#121215',
       borderStyle: 'solid', borderWidth: '1px 1px 1px 4px',
       borderTopColor: edge, borderRightColor: edge, borderBottomColor: edge, borderLeftColor: color,
@@ -24,6 +24,7 @@ export default function ComponentNode({ data, selected }: NodeProps<AaComponentF
         <span style={{ color, fontSize: 12 }}>{meta.icon}</span>{data.name}
       </div>
       <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 3 }}>{data.technology || data.type}</div>
+      {data.warning && <div style={{ color: '#f5a524', fontSize: 10.5, marginTop: 3 }}>⚠ {data.warning}</div>}
       <Handle type="source" position={Position.Right} style={handle} />
     </div>
   );

@@ -15,6 +15,8 @@ import NoteNode from './NoteNode';
 import RelationEdge from './RelationEdge';
 import PropertyInspector from './PropertyInspector';
 import ImportMermaidModal from './ImportMermaidModal';
+import ContainerNode from './ContainerNode';
+import ViewTabs from './ViewTabs';
 import AskAiModal from '../AskAiModal';
 import PasteAnswerModal from '../PasteAnswerModal';
 import PublishModal from '../PublishModal';
@@ -31,10 +33,11 @@ import type { InspectorEdits } from './SchemaForm';
 import { CATEGORY_COLOR, DND_MIME, paletteItems, type PaletteItem } from './palette-meta';
 
 // React Flow가 렌더마다 새로 만들지 않도록 컴포넌트 밖에 둔다
-const nodeTypes = { component: ComponentNode, group: GroupNode, note: NoteNode };
+const nodeTypes = { component: ComponentNode, group: GroupNode, note: NoteNode, container: ContainerNode };
 const edgeTypes = { relation: RelationEdge };
 const MODEL_WARN_BYTES = 900 * 1024;
-const CATEGORY_ORDER = ['application', 'data', 'general'];
+// 팔레트 묶음 순서. View 종류에 맞지 않는 묶음은 항목이 없어 숨겨진다 (Sprint 7: deployment 추가)
+const CATEGORY_ORDER = ['deployment', 'application', 'data', 'general'];
 // 새 노드를 놓을 때 커서가 노드 가운데쯤 오도록 (컴포넌트 168×56, 그룹 360×240, 노트 200×64)
 const DROP_OFFSET: Record<string, { x: number; y: number }> = { component: { x: 84, y: 28 }, group: { x: 180, y: 120 }, note: { x: 100, y: 32 } };
 
@@ -152,7 +155,21 @@ function Studio({ projectId }: { projectId: string }) {
 
   const view = s.model?.views.find((v) => v.id === s.viewId);
   const selected = useMemo(() => new Set(s.selectedNodeIds), [s.selectedNodeIds]);
-  const flow = useMemo(() => (s.model ? toFlow(s.model, s.viewId, selected) : { nodes: [], edges: [] }), [s.model, s.viewId, selected]);
+  // V11 경고(배치안의 Process 위치)를 이 View의 노드에 표시 (Sprint 7)
+  const warnMap = useMemo(() => new Map(s.placementWarnings.filter((w) => w.viewId === s.viewId && w.nodeId).map((w) => [w.nodeId!, w.message])), [s.placementWarnings, s.viewId]);
+  const flow = useMemo(() => (s.model ? toFlow(s.model, s.viewId, selected, warnMap) : { nodes: [], edges: [] }), [s.model, s.viewId, selected, warnMap]);
+
+  // 활성 View가 모델에서 사라지면(복원·다른 탭) Logical로 (Sprint 7 Q11)
+  useEffect(() => {
+    if (s.model && !s.model.views.some((v) => v.id === s.viewId)) useStudio.setState({ viewId: 'view_logical', selectedNodeIds: [], selectedEdgeIds: [] });
+  }, [s.model, s.viewId]);
+  // Inspector의 이동 버튼: 대상 노드로 화면을 맞춘다
+  useEffect(() => {
+    if (!s.focusNodeId) return;
+    const id = s.focusNodeId;
+    const t = setTimeout(() => { fitView({ nodes: [{ id }], maxZoom: 1, duration: 250 }); useStudio.setState({ focusNodeId: null }); }, 60);
+    return () => clearTimeout(t);
+  }, [s.focusNodeId, s.viewId, fitView]);
   const edges = useMemo(() => flow.edges.map((e) => ({ ...e, selected: s.selectedEdgeIds.includes(e.id) })), [flow.edges, s.selectedEdgeIds]);
   const bytes = useMemo(() => (s.model ? modelByteSize(s.model) : 0), [s.model]);
   const items = useMemo(() => paletteItems(s.registry, view?.kind ?? 'logical', query), [s.registry, view?.kind, query]);
@@ -219,7 +236,7 @@ function Studio({ projectId }: { projectId: string }) {
           요구사항
         </button>
         <button onClick={() => { edits.flush(); setImportNotice(null); setImportOpen(true); }} style={btn()} data-testid="aa-import-open"
-          disabled={!s.model || Boolean(s.recovery) || s.saveState === 'loading'} title="Mermaid flowchart를 붙여 넣어 노드·관계 만들기">
+          disabled={!s.model || Boolean(s.recovery) || s.saveState === 'loading' || view?.kind !== 'logical'} title={view?.kind === 'logical' ? 'Mermaid flowchart를 붙여 넣어 노드·관계 만들기' : 'Mermaid 가져오기는 Logical View에서만'}>
           가져오기
         </button>
         <button onClick={() => { edits.flush(); setModal('askai'); }} style={btn()} data-testid="aa-askai-open"
@@ -253,6 +270,7 @@ function Studio({ projectId }: { projectId: string }) {
         </button>
         <button onClick={() => setInspectorOpen((v) => !v)} title="Inspector 접기·펴기 (])" style={btn(true)}>◧</button>
       </div>
+      <ViewTabs edits={edits} />
 
       {s.backupMessage && <div role="status" style={{ padding: '6px 14px', color: '#f3c97a' }}>{s.backupMessage}</div>}
       {s.recovery && (
