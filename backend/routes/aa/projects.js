@@ -21,6 +21,7 @@ router.use(requireAuth);
 router.param('projectId', loadProject);
 router.use('/:projectId/requirements', require('./requirements'));
 router.use('/:projectId/export', require('./export'));
+router.use('/:projectId/reviews', require('./reviews'));
 
 const README_MAX_BYTES = 64 * 1024;
 const DESCRIPTION_MAX = 2000;

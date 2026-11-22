@@ -95,7 +95,7 @@ describe('POST /projects/:id/export', { skip: dbSkipReason }, () => {
     assert.equal(off.status, 200);
     assert.ok(!off.body.data.content.includes('## 프로젝트 개요'));
     assert.deepEqual(off.body.data.sections, { overview: false, logicalDiagram: false, nfr: false });
-    for (const format of ['ai-md', 'pdf', undefined]) {
+    for (const format of ['model-json', 'pdf', undefined]) {   // ai-md·ai-json·mermaid는 Sprint 5에서 지원
       const r = await api(A).post(url(p.id), { format });
       assert.equal(r.status, 400);
       assert.equal(r.body.code, 'UNSUPPORTED_EXPORT_FORMAT');

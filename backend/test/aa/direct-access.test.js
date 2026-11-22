@@ -15,7 +15,7 @@ describe('AA direct browser access is blocked', { skip: dbSkipReason }, () => {
 
   const denied = (r) => r.error && r.error.code === '42501';
 
-  for (const table of ['aa_projects', 'aa_architecture_drafts', 'aa_requirements']) {
+  for (const table of ['aa_projects', 'aa_architecture_drafts', 'aa_requirements', 'aa_reviews', 'aa_review_answers']) {
     it(`${table} 읽기 거부`, async () => {
       assert.ok(denied(await browser.from(table).select('*').limit(1)));
     });
@@ -31,6 +31,16 @@ describe('AA direct browser access is blocked', { skip: dbSkipReason }, () => {
     assert.ok(denied(await browser.rpc('aa_save_draft', { p_project: project.id, p_user: USER_A, p_base_revision: 1, p_model: emptyModel() })));
     assert.ok(denied(await browser.rpc('aa_create_project', { p_user: USER_A, p_name: '[aa-test] direct', p_description: null, p_readme_md: '', p_model: emptyModel() })));
     assert.ok(denied(await browser.rpc('aa_next_code', { p_project: project.id, p_prefix: 'NFR' })));
+  });
+
+  it('P2a: aa_reviews 쓰기와 RPC aa_create_manual_review 호출 거부 (Sprint 5)', async () => {
+    assert.ok(denied(await browser.from('aa_reviews').insert({ project_id: project.id, user_id: USER_A, draft_revision: 1 })));
+    assert.ok(denied(await browser.rpc('aa_create_manual_review', {
+      p_project: project.id, p_user: USER_A, p_draft_revision: 1, p_bundle_id: null, p_bundle_scope: null,
+      p_bundle_md: null, p_tool: 'Claude', p_answer_md: 'x', p_client_request_id: null,
+    })));
+    const { count } = await aaDb().from('aa_reviews').select('id', { count: 'exact', head: true }).eq('project_id', project.id);
+    assert.equal(count, 0);
   });
 
   it('거부된 시도 뒤에도 프로젝트와 Draft는 그대로', async () => {

@@ -199,3 +199,138 @@ notify pgrst, 'reload schema';
 --  where n.nspname = 'public' and p.proname like 'aa\_%';                     -- 전부 false
 
 -- 되돌리기 SQL은 schema_aa_workbench_rollback_p1.sql (별도 파일)
+
+-- =====================================================================
+-- P2a (Phase 2 · Sprint 5) — 외부 AI 수동 리뷰: reviews · review_answers · RPC 1개 · 권한
+-- 03 P2 블록 중 Sprint 5에 필요한 부분만 (Sprint 5 실행계획 Q1·Q7·Q8·Q11).
+-- 버전 FK(aa_reviews.version_id → aa_architecture_versions, Postgres 15 구문)는 P2b(Sprint 6)에서 추가한다.
+-- 이 블록의 version_id는 항상 NULL이다 (Draft 기준만).
+-- PostgreSQL 15 전용 구문 없음. 다시 실행해도 안전. 권한은 이 블록이 만든 객체에만 적용한다.
+-- 적용 전: 이 Supabase 프로젝트가 운영과 같은지 확인 (Sprint 5 U1).
+-- =====================================================================
+begin;
+
+-- 5. reviews (manual) -------------------------------------------------
+create table if not exists public.aa_reviews (
+  id                     uuid primary key default gen_random_uuid(),
+  project_id             uuid not null,
+  user_id                uuid not null,
+  version_id             uuid,                       -- P2b에서 버전 FK 추가. P2a에서는 항상 NULL
+  draft_revision         int,
+  mode                   text not null default 'manual' check (mode in ('manual','api')),
+  model_snapshot         jsonb,
+  bundle_id              text check (bundle_id is null or char_length(bundle_id) <= 40),
+  bundle_scope           jsonb,                      -- { format, scopeLabel, scope, template, question } — format: ai-md | ai-json
+  bundle_md              text check (bundle_md is null or octet_length(bundle_md) <= 524288),  -- 실제로 복사한 원문 (ai-json이면 JSON 원문)
+  requirements_snapshot  jsonb not null default '{}'::jsonb,
+  model_hash             text,
+  areas                  text[] not null default '{}',
+  status                 text not null default 'queued' check (status in ('queued','running','done','failed')),
+  worker_id              text,
+  heartbeat_at           timestamptz,
+  error                  text,
+  ai_model               text,
+  input_tokens           int,
+  output_tokens          int,
+  summary                text,
+  started_at             timestamptz,
+  finished_at            timestamptz,
+  client_request_id      uuid,                       -- 저장 재시도 중복 방지 (Q11)
+  created_at             timestamptz not null default now(),
+  foreign key (project_id, user_id) references public.aa_projects(id, user_id) on delete cascade,
+  unique (project_id, id),
+  unique (project_id, client_request_id),
+  check (version_id is not null or draft_revision is not null),
+  check (mode <> 'api' or (model_snapshot is not null and model_hash is not null))
+);
+alter table public.aa_reviews enable row level security;
+
+-- 5-1. 수동 리뷰 답변 (REV-M2·M7) -------------------------------------
+create table if not exists public.aa_review_answers (
+  id                 uuid primary key default gen_random_uuid(),
+  review_id          uuid not null,
+  project_id         uuid not null,
+  user_id            uuid not null,
+  tool               text not null check (char_length(tool) between 1 and 60),
+  answer_md          text not null check (octet_length(answer_md) <= 262144),
+  follow_up_of       uuid,
+  follow_up_question text check (follow_up_question is null or char_length(follow_up_question) <= 2000),
+  client_request_id  uuid,
+  created_at         timestamptz not null default now(),
+  foreign key (project_id, user_id) references public.aa_projects(id, user_id) on delete cascade,
+  foreign key (project_id, review_id) references public.aa_reviews(project_id, id) on delete cascade,
+  unique (project_id, id),
+  unique (project_id, client_request_id)
+);
+alter table public.aa_review_answers enable row level security;
+
+create index if not exists aa_review_answers_review_idx on public.aa_review_answers (review_id, created_at);
+create index if not exists aa_reviews_project_created_idx on public.aa_reviews (project_id, created_at desc);
+create index if not exists aa_reviews_active_status_idx on public.aa_reviews (status) where status in ('queued','running');
+
+-- RPC: 수동 리뷰 + 첫 답변을 한 트랜잭션으로 (05 §5).
+-- 같은 client_request_id면 새로 만들지 않고 기존 것을 돌려준다 (existing = true).
+create or replace function public.aa_create_manual_review(
+  p_project uuid, p_user uuid, p_draft_revision int,
+  p_bundle_id text, p_bundle_scope jsonb, p_bundle_md text,
+  p_tool text, p_answer_md text, p_client_request_id uuid
+)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare v_review uuid; v_answer uuid;
+begin
+  if p_client_request_id is not null then
+    select r.id into v_review from public.aa_reviews r
+     where r.project_id = p_project and r.user_id = p_user and r.client_request_id = p_client_request_id;
+    if found then
+      select a.id into v_answer from public.aa_review_answers a
+       where a.project_id = p_project and a.review_id = v_review order by a.created_at, a.id limit 1;
+      return jsonb_build_object('review_id', v_review, 'answer_id', v_answer, 'existing', true);
+    end if;
+  end if;
+
+  insert into public.aa_reviews (project_id, user_id, version_id, draft_revision, mode, status,
+                                 bundle_id, bundle_scope, bundle_md, finished_at, client_request_id)
+  values (p_project, p_user, null, p_draft_revision, 'manual', 'done',
+          p_bundle_id, p_bundle_scope, p_bundle_md, now(), p_client_request_id)
+  returning id into v_review;
+
+  insert into public.aa_review_answers (review_id, project_id, user_id, tool, answer_md)
+  values (v_review, p_project, p_user, p_tool, p_answer_md)
+  returning id into v_answer;
+
+  return jsonb_build_object('review_id', v_review, 'answer_id', v_answer, 'existing', false);
+exception when unique_violation then
+  -- 같은 요청이 동시에 두 번 들어온 경우: 먼저 커밋된 것을 돌려준다 (이 블록의 insert는 모두 취소됨)
+  select r.id into v_review from public.aa_reviews r
+   where r.project_id = p_project and r.user_id = p_user and r.client_request_id = p_client_request_id;
+  if not found then raise; end if;
+  select a.id into v_answer from public.aa_review_answers a
+   where a.project_id = p_project and a.review_id = v_review order by a.created_at, a.id limit 1;
+  return jsonb_build_object('review_id', v_review, 'answer_id', v_answer, 'existing', true);
+end $$;
+
+-- 권한: 이 블록이 만든 객체만 (기존 P1 객체는 건드리지 않음)
+revoke all on public.aa_reviews, public.aa_review_answers from anon, authenticated;
+grant all on public.aa_reviews, public.aa_review_answers to service_role;
+revoke execute on function public.aa_create_manual_review(uuid, uuid, int, text, jsonb, text, text, text, uuid) from public, anon, authenticated;
+grant execute on function public.aa_create_manual_review(uuid, uuid, int, text, jsonb, text, text, text, uuid) to service_role;
+
+commit;
+
+notify pgrst, 'reload schema';
+
+-- =====================================================================
+-- P2a 적용 후 확인용 (따로 실행)
+-- =====================================================================
+-- select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
+--  where n.nspname = 'public' and c.relname in ('aa_reviews','aa_review_answers');                               -- 2행, true
+-- select grantee, table_name, privilege_type from information_schema.role_table_grants
+--  where table_name in ('aa_reviews','aa_review_answers') and grantee in ('anon','authenticated');              -- 0행
+-- select has_function_privilege('anon', 'public.aa_create_manual_review(uuid, uuid, int, text, jsonb, text, text, text, uuid)', 'execute') as anon_exec,
+--        has_function_privilege('authenticated', 'public.aa_create_manual_review(uuid, uuid, int, text, jsonb, text, text, text, uuid)', 'execute') as auth_exec;  -- false, false
+
+-- 되돌리기 SQL은 schema_aa_workbench_rollback_p2a.sql (별도 파일)

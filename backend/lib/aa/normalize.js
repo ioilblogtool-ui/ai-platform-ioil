@@ -126,13 +126,21 @@ function normalizeModel(model, context = {}) {
     .map((r) => ({ code: r.code, kind: r.kind, title: r.title, category: r.category ?? null, target: r.target ?? null, metric: r.metric ?? null }))
     .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 
-  return {
+  const result = {
     components: list,
     relations,
     groups: normalizedGroups,
     techStack,
     requirements: { fr: reqs.filter((r) => r.kind === 'fr'), nfr: reqs.filter((r) => r.kind === 'nfr') },
   };
+  // 범위 선택용 내부 색인 (Ask AI 빌더 전용). 출력 구조에 넣지 않도록 열거되지 않는 속성으로 둔다
+  if (context.withIndex) {
+    Object.defineProperty(result, 'index', {
+      enumerable: false,
+      value: { componentRefById: new Map([...nameOf].map(([id, entry]) => [id, entry.ref])) },
+    });
+  }
+  return result;
 }
 
 module.exports = { normalizeModel, SECRET_KEY_RE, ENV_VALUE_RE };

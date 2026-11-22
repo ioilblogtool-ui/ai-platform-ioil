@@ -45,6 +45,8 @@ app.use(cors({
 // AA Workbench 설계 저장 경로만 본문 2MB (모델 한도 1MB는 validator가 별도로 검사).
 // 전역 파서보다 먼저 등록해야 한다 — body-parser는 이미 파싱된 요청을 건너뛴다.
 app.use('/api/aa/projects/:projectId/architecture', express.json({ limit: '2mb' }));
+// 외부 AI 수동 리뷰 저장: 답변 256KiB + 번들 원문 512KiB가 들어오므로 1MB (Sprint 5 Q7). 값별 한도는 라우트가 검사한다
+app.use('/api/aa/projects/:projectId/reviews', express.json({ limit: '1mb' }));
 app.use(express.json());   // 그 외 경로는 기본 100KB
 
 // 헬스체크
