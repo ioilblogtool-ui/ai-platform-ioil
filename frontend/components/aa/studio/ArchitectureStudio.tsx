@@ -252,6 +252,9 @@ function Studio({ projectId }: { projectId: string }) {
         <button onClick={() => router.push(`/aa/projects/${projectId}/versions`)} style={btn()} data-testid="aa-versions-open">
           버전
         </button>
+        {s.baseVersion && <button onClick={() => router.push(`/aa/projects/${projectId}/compare?from=${s.baseVersion!.id}&to=draft`)} style={btn()} data-testid="aa-compare-open" aria-label={`${s.baseVersion.label}과 Draft 비교`}>
+          비교
+        </button>}
         <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }} data-testid="aa-revision">Draft · rev {s.baseRevision || '–'}{s.baseVersion ? ` · base ${s.baseVersion.label}` : ''}</span>
         <div style={{ flex: 1 }} />
         {bytes > MODEL_WARN_BYTES && <span style={{ fontSize: 12, color: '#f5a524' }}>설계 크기 {Math.round(bytes / 1024)}KB (한도 1MB)</span>}

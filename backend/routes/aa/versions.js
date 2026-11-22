@@ -227,3 +227,5 @@ router.post('/:versionId/restore', wrap(async (req, res) => {
 
 module.exports = router;
 module.exports.suggestLabel = suggestLabel;
+module.exports.loadDraft = loadDraft;
+module.exports.loadRequirements = loadRequirements;

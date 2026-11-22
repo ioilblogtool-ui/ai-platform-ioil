@@ -28,6 +28,7 @@ export const {
   getVersion,
   publishVersion,
   restoreVersion,
+  compareVersions,
   saveDraft,
   getTypeRegistry,
 } = aaApi;

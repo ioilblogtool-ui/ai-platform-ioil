@@ -24,6 +24,7 @@ router.use('/:projectId/requirements', require('./requirements'));
 router.use('/:projectId/export', require('./export'));
 router.use('/:projectId/reviews', require('./reviews'));
 router.use('/:projectId/architecture/versions', require('./versions'));
+router.use('/:projectId/architecture/compare', require('./compare'));
 
 const README_MAX_BYTES = 64 * 1024;
 const DESCRIPTION_MAX = 2000;

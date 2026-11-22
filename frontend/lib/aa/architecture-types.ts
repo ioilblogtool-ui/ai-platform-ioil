@@ -121,6 +121,8 @@ export type DiffSummary =
       componentsAdded: number; componentsRemoved: number; componentsModified: number; requirementLinksChanged: number;
       relationsAdded: number; relationsRemoved: number; relationsModified: number;
       nodesReparented: number; viewChanges: number; layoutOnly: number; requirementsChanged: number;
+      /** Sprint 7: 같은 배치안의 배포 전략 변경·삭제 (이전 버전에는 없음) */
+      strategiesChanged?: number;
     };
 export interface VersionListItem { id: string; versionNo: number; label: string; note: string | null; diffSummary: DiffSummary | null; sourceRevision: number; createdAt: string }
 export interface VersionRequirement {
@@ -137,6 +139,30 @@ export interface PublishPreview {
   noChanges: boolean;
   layoutOnly: number;
   snapshotHash: string;
+}
+export type FieldChange = { path: string; before: unknown; after: unknown };
+/** GET /architecture/compare 의 변경 한 건 (Sprint 7 Step 4) */
+export type CompareChange =
+  | { kind: 'component.added' | 'component.removed'; componentId: string; name: string; type: string; viewIds: string[] }
+  | { kind: 'component.modified'; componentId: string; name: string; type: string; fields: FieldChange[]; viewIds: string[] }
+  | { kind: 'component.requirements'; componentId: string; name: string; added: string[]; removed: string[]; viewIds: string[] }
+  | { kind: 'relation.added' | 'relation.removed'; relationId: string; relationType: string; from: string; to: string; fromId: string; toId: string; protocol: string | null }
+  | { kind: 'relation.modified'; relationId: string; relationType: string; from: string; to: string; fromId: string; toId: string; fields: FieldChange[] }
+  | { kind: 'relation.requirements'; relationId: string; relationType: string; from: string; to: string; fromId: string; toId: string; added: string[]; removed: string[] }
+  | { kind: 'view.added' | 'view.removed'; viewId: string; viewKind: string; variant: string }
+  | { kind: 'view.renamed'; viewId: string; viewKind: string; before: string; after: string }
+  | { kind: 'view.strategy'; viewId: string; variant: string; change: 'added' | 'modified' | 'removed' }
+  | { kind: 'view.node.added' | 'view.node.removed' | 'layout.moved' | 'layout.resized'; viewId: string; nodeId: string; name: string }
+  | { kind: 'view.node.reparented'; viewId: string; nodeId: string; name: string; before: string | null; after: string | null }
+  | { kind: 'requirement.snapshot_changed'; code: string; change: 'added' | 'modified' | 'removed'; fields: FieldChange[] };
+export interface CompareViewMeta { id: string; kind: string; name: string; variant: string | null }
+export interface CompareResult {
+  from: { type: 'version'; id: string; label: string; versionNo: number; createdAt: string };
+  to: { type: 'version'; id: string; label: string; versionNo: number; createdAt: string } | { type: 'draft'; revision: number; updatedAt: string };
+  includeLayout: boolean;
+  summary: DiffSummary;
+  changes: CompareChange[];
+  views: { from: CompareViewMeta[]; to: CompareViewMeta[] };
 }
 export interface PublishRequest { label?: string; note?: string; baseRevision: number; expectedLatestVersionId: string | null; snapshotHash: string }
 

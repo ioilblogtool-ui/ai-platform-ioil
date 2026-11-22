@@ -143,7 +143,9 @@ function Versions({ id }: { id: string }) {
           </div>}
           {detailError && <Card><div role="alert" style={{ color: '#f87171' }}>{detailError}</div></Card>}
           {selectedId && !detail && !detailError && <Card><span style={muted}>버전을 불러오는 중…</span></Card>}
-          {detail && <VersionDetailView detail={detail} onRestore={() => void askRestore()} />}
+          {detail && <VersionDetailView detail={detail} onRestore={() => void askRestore()}
+            onCompare={(from, to) => router.push(`${base}/compare?from=${from}&to=${to}`)}
+            previousId={items?.[(items?.findIndex((v) => v.id === detail.id) ?? -1) + 1]?.id ?? null} />}
         </div>
       </main>
 
@@ -170,7 +172,7 @@ function Versions({ id }: { id: string }) {
   );
 }
 
-function VersionDetailView({ detail, onRestore }: { detail: VersionDetail; onRestore: () => void }) {
+function VersionDetailView({ detail, onRestore, onCompare, previousId }: { detail: VersionDetail; onRestore: () => void; onCompare: (from: string, to: string) => void; previousId: string | null }) {
   const [showReadme, setShowReadme] = useState(false);
   const layout = miniCanvasLayout(detail.model);
   const components = Object.values(detail.model.components).sort((a, b) => a.name.localeCompare(b.name));
@@ -187,6 +189,8 @@ function VersionDetailView({ detail, onRestore }: { detail: VersionDetail; onRes
           <b style={{ fontSize: 16 }}>{detail.label}</b>
           <span style={muted}>#{detail.versionNo} · {fmt(detail.createdAt)} · Draft rev {detail.sourceRevision}에서 발행</span>
           <span style={{ flex: 1 }} />
+          {previousId && <Button size="sm" onClick={() => onCompare(previousId, detail.id)} data-testid="aa-version-compare-prev">이전 버전과 비교</Button>}
+          <Button size="sm" onClick={() => onCompare(detail.id, 'draft')} data-testid="aa-version-compare-draft">Draft와 비교</Button>
           <Button size="sm" variant="danger" onClick={onRestore} data-testid="aa-version-restore">이 버전으로 복원</Button>
         </div>
         {detail.note && <div style={{ marginTop: 10, fontSize: 13 }} data-testid="aa-version-note">{detail.note}</div>}

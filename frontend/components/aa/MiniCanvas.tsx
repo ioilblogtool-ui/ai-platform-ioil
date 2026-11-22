@@ -4,16 +4,19 @@
 // 좌표 계산은 lib/aa/overview.ts miniCanvasLayout.
 import type { MiniCanvas as Layout } from '@/lib/aa/overview';
 
-export default function MiniCanvas({ layout, height = 300, highlight, label = 'Logical View 미리보기', testId = 'aa-mini-canvas' }: {
+export default function MiniCanvas({ layout, height = 300, highlight, modified, label = 'Logical View 미리보기', testId = 'aa-mini-canvas' }: {
   layout: Layout;
   height?: number;
   /** 강조할 노드 ID (가져오기로 새로 생길 노드·그룹) */
   highlight?: Set<string>;
+  /** 바뀐 노드 ID (Version Compare, 주황) */
+  modified?: Set<string>;
   label?: string;
   testId?: string;
 }) {
   const { x, y, w, h } = layout.viewBox;
   const isNew = (id: string) => Boolean(highlight?.has(id));
+  const isMod = (id: string) => !isNew(id) && Boolean(modified?.has(id));
   return (
     <svg role="img" aria-label={label} data-testid={testId} viewBox={`${x} ${y} ${w} ${h}`}
       style={{ width: '100%', height, background: '#0b0b0d', borderRadius: 8, border: '1px solid #ffffff10' }}
@@ -26,7 +29,8 @@ export default function MiniCanvas({ layout, height = 300, highlight, label = 'L
       {layout.boxes.filter((b) => b.kind === 'group').map((b) => (
         <g key={b.id}>
           <rect x={b.x} y={b.y} width={b.w} height={b.h} rx={10} fill="rgba(200,169,110,0.04)"
-            stroke={isNew(b.id) ? '#4ade80' : 'rgba(200,169,110,0.35)'} strokeDasharray="6 4" />
+            stroke={isNew(b.id) ? '#4ade80' : isMod(b.id) ? '#f5a524' : 'rgba(200,169,110,0.35)'} strokeDasharray="6 4"
+            data-tone={isNew(b.id) ? 'added' : isMod(b.id) ? 'modified' : undefined} />
           <text x={b.x + 10} y={b.y + 18} fontSize={12} fill="#c8a96e">{b.label}</text>
         </g>
       ))}
@@ -40,8 +44,8 @@ export default function MiniCanvas({ layout, height = 300, highlight, label = 'L
         <g key={b.id}>
           <rect x={b.x} y={b.y} width={b.w} height={b.h} rx={8}
             fill={b.kind === 'note' ? 'rgba(245,165,36,0.08)' : '#121215'}
-            stroke={isNew(b.id) ? '#4ade80' : b.kind === 'note' ? 'rgba(245,165,36,0.4)' : 'rgba(255,255,255,0.18)'}
-            strokeWidth={isNew(b.id) ? 2 : 1} />
+            stroke={isNew(b.id) ? '#4ade80' : isMod(b.id) ? '#f5a524' : b.kind === 'note' ? 'rgba(245,165,36,0.4)' : 'rgba(255,255,255,0.18)'}
+            strokeWidth={isNew(b.id) || isMod(b.id) ? 2 : 1} data-tone={isNew(b.id) ? 'added' : isMod(b.id) ? 'modified' : undefined} />
           <text x={b.x + 12} y={b.y + 24} fontSize={13} fontWeight={600} fill="#e2e0db">{clip(b.label, 20)}</text>
           {b.sub && <text x={b.x + 12} y={b.y + 42} fontSize={11} fill="#9a98a8">{clip(b.sub, 24)}</text>}
         </g>

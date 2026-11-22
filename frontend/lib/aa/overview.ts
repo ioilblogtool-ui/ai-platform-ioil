@@ -42,7 +42,10 @@ export function miniCanvasLayout(model: ArchitectureModel | null | undefined, vi
     } else {
       const component = node.componentId ? model.components[node.componentId] : undefined;
       if (!component) continue;
-      const box: MiniBox = { id: node.id, kind: 'component', x, y, ...SIZE.component, label: component.name, sub: component.technology || component.type };
+      // 배치안의 컨테이너(환경·구역·플랫폼·VM)는 크기가 있는 상자 → 그룹처럼 그린다
+      const box: MiniBox = node.width && node.height
+        ? { id: node.id, kind: 'group', x, y, w: node.width, h: node.height, label: component.name }
+        : { id: node.id, kind: 'component', x, y, ...SIZE.component, label: component.name, sub: component.technology || component.type };
       boxes.push(box);
       byComponent.set(component.id, box);
     }

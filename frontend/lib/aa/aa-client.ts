@@ -5,7 +5,7 @@
 // AA는 { status, code, details }를 보존하는 전용 래퍼를 쓴다 (409 충돌 처리에 currentRevision 필요).
 import type {
   AaProject, AaProjectDetail, AaProjectSummary, ArchitectureModel, DiffSummary, DraftResponse,
-  PublishPreview, PublishRequest, VersionDetail, VersionListItem,
+  CompareResult, PublishPreview, PublishRequest, VersionDetail, VersionListItem,
   AskAiExportRequest, AskAiExportResult, ListProjectsParams, ListRequirementsParams, ProjectStatus, ReadmeExportRequest, ReadmeExportResult,
   Requirement, RequirementCreate, ReviewBundle, ReviewDetail, ReviewListItem,
   RequirementUpdate, SaveDraftResult, TypeRegistry, ValidationIssue,
@@ -178,6 +178,11 @@ export function createAaClient(deps: AaClientDeps) {
       const res = await request<{ data: { revision: number; updatedAt: string }; warnings: ValidationIssue[] }>(
         `${p(projectId)}/architecture/versions/${encodeURIComponent(versionId)}/restore`, json('POST', { baseRevision }));
       return { ...res.data, warnings: res.warnings ?? [] };
+    },
+
+    /** from: 버전 id, to: 버전 id 또는 'draft'. 모델은 담지 않는다 */
+    async compareVersions(projectId: string, params: { from: string; to: string; includeLayout?: boolean }) {
+      return (await request<{ data: CompareResult }>(`${p(projectId)}/architecture/compare${deps.buildQuery({ from: params.from, to: params.to, includeLayout: params.includeLayout ? 'true' : undefined })}`)).data;
     },
 
     // ── 메타 ──

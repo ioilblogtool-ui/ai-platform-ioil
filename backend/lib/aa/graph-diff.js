@@ -94,4 +94,110 @@ function hasSemanticChanges(summary) {
   return Object.entries(summary).some(([k, v]) => !['hashVersion', 'layoutOnly'].includes(k) && typeof v === 'number' && v > 0);
 }
 
-module.exports = { summarize, hasSemanticChanges };
+// ── 상세 변경 목록 (Sprint 7 Step 4 · 05 §4 compare · 03 §4) ─────────────────────
+const SNAP_FIELDS = ['code', 'kind', 'category', 'title', 'target', 'metric', 'priority'];
+const COMPONENT_FIELDS = ['name', 'type', 'technology', 'description'];
+const RELATION_FIELDS = ['type', 'from', 'to', 'protocol', 'mode', 'label'];
+
+/** 두 값의 경로별 차이 (객체는 한 단계 펼침: properties.port, custom.key) */
+function fieldDiffs(a, b, fields, nested = []) {
+  const out = [];
+  for (const f of fields) if (!same(a[f] ?? null, b[f] ?? null)) out.push({ path: f, before: a[f] ?? null, after: b[f] ?? null });
+  for (const key of nested) {
+    const x = a[key] ?? {}, y = b[key] ?? {};
+    for (const k of [...new Set([...Object.keys(x), ...Object.keys(y)])].sort()) {
+      if (!same(x[k] ?? null, y[k] ?? null)) out.push({ path: `${key}.${k}`, before: x[k] ?? null, after: y[k] ?? null });
+    }
+  }
+  if (!same([...(a.tags ?? [])].sort(), [...(b.tags ?? [])].sort()) && (a.tags || b.tags)) out.push({ path: 'tags', before: a.tags ?? [], after: b.tags ?? [] });
+  return out;
+}
+
+/**
+ * 두 모델의 상세 변경 목록. 화면이 그대로 보여줄 수 있게 이름을 함께 담는다.
+ * @param {{ model, snapshot }} prev @param {{ model, snapshot }} next
+ * @param {{ includeLayout?: boolean }} [opts]
+ */
+function diffModels(prev, next, opts = {}) {
+  const A = prev.model ?? {}, B = next.model ?? {};
+  const ca = A.components ?? {}, cb = B.components ?? {};
+  const ra = A.relations ?? {}, rb = B.relations ?? {};
+  const snapA = prev.snapshot ?? {}, snapB = next.snapshot ?? {};
+  const codeOf = (id) => snapB[id]?.code ?? snapA[id]?.code ?? '(지운 요구사항)';
+  const compName = (id) => cb[id]?.name ?? ca[id]?.name ?? '?';
+  const viewsOf = (model, cid) => (model.views ?? []).filter((v) => v.nodes.some((n) => n.componentId === cid)).map((v) => v.id);
+  const changes = [];
+  const reqDiff = (x, y) => {
+    const before = new Set(x ?? []), after = new Set(y ?? []);
+    return { added: [...after].filter((id) => !before.has(id)).map(codeOf).sort(), removed: [...before].filter((id) => !after.has(id)).map(codeOf).sort() };
+  };
+
+  // 컴포넌트
+  for (const [id, c] of Object.entries(cb)) {
+    const o = ca[id];
+    if (!o) { changes.push({ kind: 'component.added', componentId: id, name: c.name, type: c.type, viewIds: viewsOf(B, id) }); continue; }
+    const fields = fieldDiffs(o, c, COMPONENT_FIELDS, ['properties', 'custom']);
+    if (fields.length) changes.push({ kind: 'component.modified', componentId: id, name: c.name, type: c.type, fields, viewIds: viewsOf(B, id) });
+    const r = reqDiff(o.requirementIds, c.requirementIds);
+    if (r.added.length || r.removed.length) changes.push({ kind: 'component.requirements', componentId: id, name: c.name, ...r, viewIds: viewsOf(B, id) });
+  }
+  for (const [id, c] of Object.entries(ca)) {
+    if (!cb[id]) changes.push({ kind: 'component.removed', componentId: id, name: c.name, type: c.type, viewIds: viewsOf(A, id) });
+  }
+
+  // 관계
+  const relInfo = (r) => ({ relationId: r.id, relationType: r.type, from: compName(r.from), to: compName(r.to), fromId: r.from, toId: r.to });
+  for (const [id, r] of Object.entries(rb)) {
+    const o = ra[id];
+    if (!o) { changes.push({ kind: 'relation.added', ...relInfo(r), protocol: r.protocol ?? null }); continue; }
+    const fields = fieldDiffs(o, r, RELATION_FIELDS).filter((f) => f.path !== 'tags');
+    if (fields.length) changes.push({ kind: 'relation.modified', ...relInfo(r), fields });
+    const q = reqDiff(o.requirementIds, r.requirementIds);
+    if (q.added.length || q.removed.length) changes.push({ kind: 'relation.requirements', ...relInfo(r), ...q });
+  }
+  for (const [id, r] of Object.entries(ra)) if (!rb[id]) changes.push({ kind: 'relation.removed', ...relInfo(r), protocol: r.protocol ?? null });
+
+  // View·배치안·노드
+  const va = new Map((A.views ?? []).map((v) => [v.id, v])), vb = new Map((B.views ?? []).map((v) => [v.id, v]));
+  const nodeName = (model, v, n) => (n?.componentId ? model.components?.[n.componentId]?.name ?? '?' : n?.kind === 'group' ? n.label || 'Boundary' : n?.kind === 'note' ? 'Note' : '?');
+  for (const [id, v] of vb) {
+    const o = va.get(id);
+    if (!o) { changes.push({ kind: 'view.added', viewId: id, viewKind: v.kind, variant: v.variant ?? v.name }); continue; }
+    if ((o.variant ?? null) !== (v.variant ?? null) || o.name !== v.name) {
+      changes.push({ kind: 'view.renamed', viewId: id, viewKind: v.kind, before: o.variant ?? o.name, after: v.variant ?? v.name });
+    }
+    if ((o.strategyMd ?? '') !== (v.strategyMd ?? '')) {
+      changes.push({ kind: 'view.strategy', viewId: id, variant: v.variant ?? v.name, change: !o.strategyMd ? 'added' : !v.strategyMd ? 'removed' : 'modified' });
+    }
+    const on = new Map(o.nodes.map((n) => [n.id, n]));
+    const parentName = (model, view, pid) => (pid ? nodeName(model, view, view.nodes.find((x) => x.id === pid)) : null);
+    for (const n of v.nodes) {
+      const p = on.get(n.id);
+      if (!p) { changes.push({ kind: 'view.node.added', viewId: id, nodeId: n.id, name: nodeName(B, v, n) }); continue; }
+      if ((p.parentId ?? null) !== (n.parentId ?? null)) {
+        changes.push({ kind: 'view.node.reparented', viewId: id, nodeId: n.id, name: nodeName(B, v, n), before: parentName(A, o, p.parentId), after: parentName(B, v, n.parentId) });
+      }
+      if (opts.includeLayout) {
+        if (p.position?.x !== n.position?.x || p.position?.y !== n.position?.y) changes.push({ kind: 'layout.moved', viewId: id, nodeId: n.id, name: nodeName(B, v, n) });
+        if ((p.width ?? null) !== (n.width ?? null) || (p.height ?? null) !== (n.height ?? null)) changes.push({ kind: 'layout.resized', viewId: id, nodeId: n.id, name: nodeName(B, v, n) });
+      }
+    }
+    const nb = new Set(v.nodes.map((n) => n.id));
+    for (const n of o.nodes) if (!nb.has(n.id)) changes.push({ kind: 'view.node.removed', viewId: id, nodeId: n.id, name: nodeName(A, o, n) });
+  }
+  for (const [id, v] of va) if (!vb.has(id)) changes.push({ kind: 'view.removed', viewId: id, viewKind: v.kind, variant: v.variant ?? v.name });
+
+  // 요구사항 스냅샷 (발행 당시 값의 차이)
+  for (const id of [...new Set([...Object.keys(snapA), ...Object.keys(snapB)])]) {
+    const x = snapA[id], y = snapB[id];
+    if (x && y) {
+      const fields = SNAP_FIELDS.filter((f) => (x[f] ?? null) !== (y[f] ?? null)).map((f) => ({ path: f, before: x[f] ?? null, after: y[f] ?? null }));
+      if (fields.length) changes.push({ kind: 'requirement.snapshot_changed', code: y.code, change: 'modified', fields });
+    } else {
+      changes.push({ kind: 'requirement.snapshot_changed', code: (y ?? x).code, change: y ? 'added' : 'removed', fields: [] });
+    }
+  }
+  return { summary: summarize(prev, next), changes };
+}
+
+module.exports = { summarize, hasSemanticChanges, diffModels };
