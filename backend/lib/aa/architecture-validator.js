@@ -1,5 +1,6 @@
 // 아키텍처 모델 저장 전 검증 (03 데이터 모델 §2.2)
-// V1~V6, V7(경고), V8, V12.
+// V1~V6, V7(경고), V8, V11(경고), V12, V13.
+// Sprint 7: realizes 규칙(V2), 컨테이너 컴포넌트 부모(V5), Deployment View 한도(V13).
 // V6: 타입 레지스트리(type-registry.json — /api/aa/meta/types와 같은 원본) 기준 컴포넌트 타입·속성 검증.
 //     모든 속성은 선택 항목이다. 있는 키만 검사하고, 기본값을 채우거나 값을 바꾸지 않는다 (Sprint 1 저장본 호환).
 const { isUuid } = require('./requirement-refs');
@@ -29,6 +30,12 @@ const GROUP_MIN_SIZE = 80;
 const STRING_MAX = 500;
 const TEXT_MAX = 5000;
 const LIST_MAX_ITEMS = 50;
+// Sprint 7 (V13): 배치안 = deployment View
+const MAX_DEPLOYMENT_VIEWS = 5;
+const VARIANT_MAX = 60;
+const STRATEGY_MAX_BYTES = 64 * 1024;
+
+const typeDef = (type) => (typeof type === 'string' && Object.prototype.hasOwnProperty.call(REGISTRY.types, type) ? REGISTRY.types[type] : null);
 
 // V6: 속성 값 하나를 스키마 정의로 검사. 문제 없으면 null, 있으면 메시지
 function checkPropertyValue(def, value) {
@@ -149,6 +156,7 @@ function validateModel(model) {
 
   // V2: 관계 끝점
   const relations = model.relations;
+  const realizesPairs = new Set();
   for (const [key, r] of Object.entries(relations)) {
     const p = `relations.${key}`;
     if (!isObj(r)) { err('STRUCTURE', p, '관계는 객체여야 합니다.'); continue; }
@@ -159,10 +167,23 @@ function validateModel(model) {
     if (!RELATION_TYPES.has(r.type)) err('V2', `${p}.type`, `지원하지 않는 관계 유형입니다: ${r.type}`);
     if (!Object.prototype.hasOwnProperty.call(components, r.from)) err('V2', `${p}.from`, `존재하지 않는 컴포넌트입니다: ${r.from}`);
     if (!Object.prototype.hasOwnProperty.call(components, r.to)) err('V2', `${p}.to`, `존재하지 않는 컴포넌트입니다: ${r.to}`);
+    // Sprint 7: realizes = 구현체(레지스트리 realizes: true) → Logical 컴포넌트. 속성 없음, 같은 쌍 하나
+    if (r.type === 'realizes' && isObj(components[r.from]) && isObj(components[r.to])) {
+      if (!typeDef(components[r.from].type)?.realizes) err('V2', `${p}.from`, 'realizes의 시작은 Process·Managed DB·Managed Auth여야 합니다.');
+      if (components[r.to].layer !== 'logical') err('V2', `${p}.to`, 'realizes의 대상은 Logical 컴포넌트여야 합니다.');
+      for (const k of ['protocol', 'mode', 'label']) if (r[k] !== undefined && r[k] !== null) err('V2', `${p}.${k}`, `realizes에는 ${k}를 두지 않습니다.`);
+      const pair = `${r.from}>${r.to}`;
+      if (realizesPairs.has(pair)) err('V2', p, '같은 구현체·대상의 realizes가 이미 있습니다.');
+      realizesPairs.add(pair);
+    }
   }
 
   // 뷰·노드·엣지
   const componentsWithNode = new Set();
+  // V13: 배치안 수·이름
+  const deploymentViews = model.views.filter((v) => isObj(v) && v.kind === 'deployment');
+  if (deploymentViews.length > MAX_DEPLOYMENT_VIEWS) err('V13', 'views', `배치안은 최대 ${MAX_DEPLOYMENT_VIEWS}개입니다.`);
+  const variants = new Set();
   model.views.forEach((v, vi) => {
     const vp = `views[${vi}]`;
     if (!isObj(v)) { err('STRUCTURE', vp, 'view는 객체여야 합니다.'); return; }
@@ -170,6 +191,17 @@ function validateModel(model) {
     else claim(v.id, `${vp}.id`);
     if (!VIEW_KINDS.has(v.kind)) err('STRUCTURE', `${vp}.kind`, `지원하지 않는 view 종류입니다: ${v.kind}`);
     if (!Array.isArray(v.nodes) || !Array.isArray(v.edges)) { err('STRUCTURE', vp, 'nodes와 edges는 배열이어야 합니다.'); return; }
+    const isDeployment = v.kind === 'deployment';
+    if (isDeployment) {
+      const name = typeof v.variant === 'string' ? v.variant.trim() : '';
+      if (!name || name.length > VARIANT_MAX) err('V13', `${vp}.variant`, `배치안 이름은 1~${VARIANT_MAX}자여야 합니다.`);
+      else if (variants.has(name)) err('V13', `${vp}.variant`, `배치안 이름이 겹칩니다: ${name}`);
+      else variants.add(name);
+    }
+    if (v.strategyMd !== undefined && v.strategyMd !== null) {
+      if (!isDeployment) err('V13', `${vp}.strategyMd`, '배포 전략은 배치안(deployment View)에만 둘 수 있습니다.');
+      else if (typeof v.strategyMd !== 'string' || Buffer.byteLength(v.strategyMd, 'utf8') > STRATEGY_MAX_BYTES) err('V13', `${vp}.strategyMd`, '배포 전략은 64KB 이하 문자열이어야 합니다.');
+    }
 
     const nodesById = new Map();
     const componentNodeInView = new Map();
@@ -189,6 +221,13 @@ function validateModel(model) {
       } else if (n.kind === 'component') {
         err('V3', `${np}.componentId`, 'component 노드에는 componentId가 필요합니다.');
       }
+      // Sprint 7: 컨테이너 컴포넌트 노드는 group처럼 크기가 필요하다
+      if (n.kind === 'component' && typeDef(components[n.componentId]?.type)?.container) {
+        if (!isDeployment) err('V5', `${np}`, '컨테이너 컴포넌트는 배치안(deployment View)에만 둘 수 있습니다.');
+        if (!isFiniteNum(n.width) || !isFiniteNum(n.height) || n.width < GROUP_MIN_SIZE || n.height < GROUP_MIN_SIZE) {
+          err('V3', `${np}`, `컨테이너에는 ${GROUP_MIN_SIZE} 이상의 width·height가 필요합니다.`);
+        }
+      }
       // group·note는 컴포넌트가 아닌 노드 — 자체 규칙
       if (n.kind === 'note') {
         if (n.componentId) err('V3', `${np}.componentId`, 'note 노드는 컴포넌트를 가리키지 않습니다.');
@@ -202,17 +241,39 @@ function validateModel(model) {
       }
     });
 
-    // V5: parentId = 같은 View의 group 노드, 순환 없음
+    // V5: parentId = 같은 View의 group 노드 (배치안에서는 컨테이너 컴포넌트 노드도), 순환 없음
+    const canContain = (node) => node.kind === 'group'
+      || (isDeployment && node.kind === 'component' && Boolean(typeDef(components[node.componentId]?.type)?.container));
     for (const n of nodesById.values()) {
       if (n.parentId === undefined || n.parentId === null) continue;
       const parent = nodesById.get(n.parentId);
-      if (!parent || parent.kind !== 'group') { err('V5', `${vp}.nodes(${n.id}).parentId`, 'parentId는 같은 View의 group 노드여야 합니다.'); continue; }
+      if (!parent || parent.id === n.id || !canContain(parent)) {
+        err('V5', `${vp}.nodes(${n.id}).parentId`, 'parentId는 같은 View의 group 노드 또는 (배치안에서) 컨테이너 컴포넌트 노드여야 합니다.');
+        continue;
+      }
       const visited = new Set([n.id]);
       let cur = parent;
       while (cur) {
         if (visited.has(cur.id)) { err('V5', `${vp}.nodes(${n.id}).parentId`, 'parentId에 순환이 있습니다.'); break; }
         visited.add(cur.id);
         cur = cur.parentId ? nodesById.get(cur.parentId) : null;
+      }
+    }
+
+    // V11 (경고): 배치안의 Process는 조상 체인에 VM 또는 Platform이 있어야 한다
+    if (isDeployment) {
+      for (const n of nodesById.values()) {
+        if (n.kind !== 'component' || components[n.componentId]?.type !== 'dep.process') continue;
+        let cur = n.parentId ? nodesById.get(n.parentId) : null;
+        let ok = false;
+        const seenUp = new Set();
+        while (cur && !seenUp.has(cur.id)) {
+          seenUp.add(cur.id);
+          const t = components[cur.componentId]?.type;
+          if (t === 'dep.vm' || t === 'dep.platform') { ok = true; break; }
+          cur = cur.parentId ? nodesById.get(cur.parentId) : null;
+        }
+        if (!ok) warnings.push({ rule: 'V11', code: 'V11', path: `${vp}.nodes(${n.id})`, viewId: v.id, nodeId: n.id, message: 'Process는 VM 또는 Platform 안에 두세요.' });
       }
     }
 
@@ -224,6 +285,7 @@ function validateModel(model) {
       else claim(e.id, `${ep}.id`);
       const rel = Object.prototype.hasOwnProperty.call(relations, e.relationId) ? relations[e.relationId] : null;
       if (!rel) { err('V4', `${ep}.relationId`, `존재하지 않는 관계입니다: ${e.relationId}`); return; }
+      if (rel.type === 'realizes') { err('V4', `${ep}.relationId`, 'realizes 관계는 캔버스 엣지로 그리지 않습니다.'); return; }
       if (!componentNodeInView.has(rel.from) || !componentNodeInView.has(rel.to)) {
         err('V4', `${ep}.relationId`, '관계 양 끝 컴포넌트의 노드가 이 View에 있어야 합니다.');
       }
@@ -244,4 +306,4 @@ function validateModel(model) {
   return { errors, warnings, tooLarge: null };
 }
 
-module.exports = { validateModel, MODEL_MAX_BYTES, MODEL_MAX_COMPONENTS, REGISTRY, NOTE_TEXT_MAX, GROUP_MIN_SIZE };
+module.exports = { validateModel, MODEL_MAX_BYTES, MODEL_MAX_COMPONENTS, REGISTRY, NOTE_TEXT_MAX, GROUP_MIN_SIZE, MAX_DEPLOYMENT_VIEWS, VARIANT_MAX, STRATEGY_MAX_BYTES };

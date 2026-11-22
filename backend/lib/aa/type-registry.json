@@ -1,9 +1,10 @@
 {
-  "version": 2,
+  "version": 3,
   "categories": [
     { "key": "application", "label": "Application" },
     { "key": "data", "label": "Data" },
-    { "key": "general", "label": "General" }
+    { "key": "general", "label": "General" },
+    { "key": "deployment", "label": "Deployment" }
   ],
   "propertyTypes": ["string", "text", "number", "boolean", "enum", "list"],
   "types": {
@@ -92,6 +93,72 @@
       "label": "Note", "category": "general", "layer": "general", "icon": "✎", "nodeKind": "note", "views": ["logical"],
       "aliases": ["memo", "comment"],
       "properties": []
+    },
+    "dep.environment": {
+      "label": "Environment", "category": "deployment", "layer": "deployment", "icon": "▣", "nodeKind": "component", "views": ["deployment"],
+      "container": true, "aliases": ["environment", "env"],
+      "properties": [
+        { "key": "stage", "label": "단계", "type": "enum", "options": ["local", "dev", "staging", "prod"] }
+      ]
+    },
+    "dep.zone": {
+      "label": "Network Zone", "category": "deployment", "layer": "deployment", "icon": "▦", "nodeKind": "component", "views": ["deployment"],
+      "container": true, "aliases": ["zone", "subnet", "network"],
+      "properties": [
+        { "key": "trust", "label": "신뢰 구역", "type": "enum", "options": ["external", "dmz", "internal", "data"], "default": "internal" }
+      ]
+    },
+    "dep.platform": {
+      "label": "Platform (PaaS)", "category": "deployment", "layer": "deployment", "icon": "☁", "nodeKind": "component", "views": ["deployment"],
+      "container": true, "aliases": ["paas", "vercel", "railway", "render", "heroku"],
+      "properties": [
+        { "key": "provider", "label": "제공자", "type": "string", "placeholder": "Railway" },
+        { "key": "region", "label": "리전", "type": "string", "placeholder": "ap-northeast-1" }
+      ]
+    },
+    "dep.vm": {
+      "label": "VM / Host", "category": "deployment", "layer": "deployment", "icon": "▭", "nodeKind": "component", "views": ["deployment"],
+      "container": true, "aliases": ["vm", "host", "server", "ec2"],
+      "properties": [
+        { "key": "os", "label": "OS", "type": "string", "placeholder": "Ubuntu 24.04" },
+        { "key": "cpu", "label": "vCPU", "type": "number", "min": 0 },
+        { "key": "memoryGb", "label": "메모리(GB)", "type": "number", "min": 0 },
+        { "key": "count", "label": "대수", "type": "number", "integer": true, "min": 1, "default": 1 }
+      ]
+    },
+    "dep.lb": {
+      "label": "Load Balancer", "category": "deployment", "layer": "deployment", "icon": "⇋", "nodeKind": "component", "views": ["deployment"],
+      "aliases": ["lb", "load balancer", "nginx", "haproxy", "alb"],
+      "properties": [
+        { "key": "layer", "label": "계층", "type": "enum", "options": ["L4", "L7"] },
+        { "key": "provider", "label": "제공자", "type": "string" }
+      ]
+    },
+    "dep.managed_db": {
+      "label": "Managed DB", "category": "deployment", "layer": "deployment", "icon": "⛁", "nodeKind": "component", "views": ["deployment"],
+      "realizes": true, "aliases": ["dbaas", "supabase", "rds", "managed db"],
+      "properties": [
+        { "key": "provider", "label": "제공자", "type": "string", "placeholder": "Supabase" },
+        { "key": "engine", "label": "엔진", "type": "string", "placeholder": "PostgreSQL" },
+        { "key": "plan", "label": "플랜", "type": "string" }
+      ]
+    },
+    "dep.managed_auth": {
+      "label": "Managed Auth", "category": "deployment", "layer": "deployment", "icon": "⚿", "nodeKind": "component", "views": ["deployment"],
+      "realizes": true, "aliases": ["auth service", "idp", "supabase auth", "auth0", "cognito"],
+      "properties": [
+        { "key": "provider", "label": "제공자", "type": "string", "placeholder": "Supabase Auth" }
+      ]
+    },
+    "dep.process": {
+      "label": "Process", "category": "deployment", "layer": "deployment", "icon": "⚙", "nodeKind": "component", "views": ["deployment"],
+      "realizes": true, "aliases": ["process", "app", "container", "service instance"],
+      "properties": [
+        { "key": "runtime", "label": "런타임", "type": "string", "placeholder": "Node.js 24" },
+        { "key": "startCommand", "label": "시작 명령", "type": "string", "placeholder": "npm start" },
+        { "key": "port", "label": "포트", "type": "number", "integer": true, "min": 1, "max": 65535 },
+        { "key": "instances", "label": "인스턴스 수", "type": "number", "integer": true, "min": 1, "default": 1 }
+      ]
     }
   }
 }

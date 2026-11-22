@@ -68,6 +68,9 @@ function summarize(prev, next) {
   const rel = diffEntities(a.relations, b.relations);
   const views = diffViews(a.views, b.views);
   const reqs = compareSnapshots(prev.snapshot, next.snapshot);
+  // Sprint 7: 같은 View id의 배포 전략 변경·삭제 (추가·삭제된 배치안은 viewChanges)
+  const beforeViews = new Map(a.views.map((v) => [v.id, v.strategyMd ?? '']));
+  const strategiesChanged = b.views.filter((v) => beforeViews.has(v.id) && beforeViews.get(v.id) !== (v.strategyMd ?? '')).length;
   return {
     hashVersion: HASH_VERSION,
     componentsAdded: comp.added,
@@ -81,6 +84,7 @@ function summarize(prev, next) {
     viewChanges: views.viewChanges + (same(a.flows ?? null, b.flows ?? null) ? 0 : 1),
     layoutOnly: layoutChanges(prev.model, next.model),
     requirementsChanged: reqs.total,
+    strategiesChanged,
   };
 }
 

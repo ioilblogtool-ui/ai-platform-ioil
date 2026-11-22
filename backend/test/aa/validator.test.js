@@ -94,8 +94,13 @@ describe('V6: 타입 레지스트리 검증', () => {
   const { REGISTRY } = require('../../lib/aa/architecture-validator');
   const v6 = (m) => validateModel(m).errors.filter((e) => e.rule === 'V6');
 
-  it('레지스트리는 11개 타입이고 group·note만 컴포넌트가 아니다', () => {
-    assert.equal(Object.keys(REGISTRY.types).length, 11);
+  it('레지스트리는 Logical 11 + Deployment 8 = 19개 타입이고 group·note만 컴포넌트가 아니다 (Sprint 7 v3)', () => {
+    assert.equal(Object.keys(REGISTRY.types).length, 19);
+    assert.equal(REGISTRY.version, 3);
+    const dep = Object.entries(REGISTRY.types).filter(([k]) => k.startsWith('dep.'));
+    assert.deepEqual(dep.filter(([, d]) => d.container).map(([k]) => k).sort(), ['dep.environment', 'dep.platform', 'dep.vm', 'dep.zone']);
+    assert.deepEqual(dep.filter(([, d]) => d.realizes).map(([k]) => k).sort(), ['dep.managed_auth', 'dep.managed_db', 'dep.process']);
+    assert.ok(dep.every(([, d]) => d.layer === 'deployment' && d.views.length === 1 && d.views[0] === 'deployment'));
     const nonComponent = Object.entries(REGISTRY.types).filter(([, d]) => d.nodeKind !== 'component').map(([k]) => k).sort();
     assert.deepEqual(nonComponent, ['group', 'note']);
     for (const d of Object.values(REGISTRY.types)) for (const pd of d.properties) assert.ok(REGISTRY.propertyTypes.includes(pd.type), pd.key);

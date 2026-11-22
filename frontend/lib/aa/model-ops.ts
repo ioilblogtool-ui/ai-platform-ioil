@@ -184,6 +184,17 @@ export function isSelfOrDescendant(view: View, candidateId: string, ancestorId: 
   return false;
 }
 
+/**
+ * 부모가 될 수 있는 노드인가: group 노드, 또는 배치안(deployment View)의 컨테이너 타입 컴포넌트 노드 (Sprint 7, 03 V5).
+ * registry를 주지 않으면 group만 (Sprint 6까지와 같은 동작).
+ */
+export function canContain(model: ArchitectureModel, view: View, node: ViewNode, registry?: TypeRegistry | null): boolean {
+  if (node.kind === 'group') return true;
+  if (view.kind !== 'deployment' || node.kind !== 'component' || !node.componentId) return false;
+  const type = model.components[node.componentId]?.type;
+  return Boolean(type && registry?.types[type]?.container);
+}
+
 /** 모델을 복제해 대상 View와 함께 fn에 넘긴다. fn이 false를 돌려주면 원래 모델을 그대로 반환 */
 function withView(model: ArchitectureModel, viewId: string, fn: (m: ArchitectureModel, v: View) => boolean | void): ArchitectureModel {
   if (!getView(model, viewId)) return model;
@@ -219,7 +230,9 @@ export function addComponent(
     };
     m.components[componentId] = component;
     nodeId = newId('nd');
-    v.nodes.push({ id: nodeId, kind: 'component', componentId, position: round(position) });
+    const node: ViewNode = { id: nodeId, kind: 'component', componentId, position: round(position) };
+    if (def?.container) { node.width = GROUP_DEFAULT_SIZE.width; node.height = GROUP_DEFAULT_SIZE.height; }
+    v.nodes.push(node);
   });
   return { model: next, nodeId, componentId };
 }
@@ -267,18 +280,18 @@ export function moveNodes(model: ArchitectureModel, viewId: string, moves: { id:
 }
 
 /** 그룹에 넣거나(parentId) 빼기(null). 화면 절대 위치는 유지. 자기 자신·하위로의 이동, group이 아닌 부모는 거부 */
-export function canSetParent(model: ArchitectureModel, viewId: string, nodeId: string, parentId: string | null): boolean {
+export function canSetParent(model: ArchitectureModel, viewId: string, nodeId: string, parentId: string | null, registry?: TypeRegistry | null): boolean {
   const v = getView(model, viewId);
   const node = v?.nodes.find((n) => n.id === nodeId);
   if (!v || !node) return false;
   if (parentId === null) return true;
   const parent = v.nodes.find((n) => n.id === parentId);
-  if (!parent || parent.kind !== 'group') return false;
+  if (!parent || !canContain(model, v, parent, registry)) return false;
   return !isSelfOrDescendant(v, parentId, nodeId);
 }
 
-export function setParent(model: ArchitectureModel, viewId: string, nodeId: string, parentId: string | null): ArchitectureModel {
-  if (!canSetParent(model, viewId, nodeId, parentId)) return model;
+export function setParent(model: ArchitectureModel, viewId: string, nodeId: string, parentId: string | null, registry?: TypeRegistry | null): ArchitectureModel {
+  if (!canSetParent(model, viewId, nodeId, parentId, registry)) return model;
   return withView(model, viewId, (_m, v) => {
     const node = v.nodes.find((n) => n.id === nodeId)!;
     if ((node.parentId ?? null) === parentId) return false;
@@ -293,12 +306,12 @@ export function setParent(model: ArchitectureModel, viewId: string, nodeId: stri
  * 캔버스 절대 좌표 point를 품는 그룹 중 가장 안쪽(면적이 가장 작은) 그룹. 없으면 null.
  * movingNodeId를 주면 그 노드 자신과 그 하위 그룹은 후보에서 뺀다 (순환 방지).
  */
-export function findDropGroup(model: ArchitectureModel, viewId: string, point: Point, movingNodeId?: string): string | null {
+export function findDropGroup(model: ArchitectureModel, viewId: string, point: Point, movingNodeId?: string, registry?: TypeRegistry | null): string | null {
   const v = getView(model, viewId);
   if (!v) return null;
   let best: { id: string; area: number } | null = null;
   for (const g of v.nodes) {
-    if (g.kind !== 'group' || !g.width || !g.height) continue;
+    if (!canContain(model, v, g, registry) || !g.width || !g.height) continue;
     if (movingNodeId && isSelfOrDescendant(v, g.id, movingNodeId)) continue;
     const p = absolutePosition(v, g.id);
     if (point.x < p.x || point.y < p.y || point.x > p.x + g.width || point.y > p.y + g.height) continue;
@@ -499,7 +512,8 @@ export function updateGroupLabel(model: ArchitectureModel, viewId: string, nodeI
 /** 그룹 크기 조절. NodeResizer가 왼쪽·위쪽 손잡이로 줄이면 position도 함께 온다 */
 export function resizeGroup(model: ArchitectureModel, viewId: string, nodeId: string, size: Size, position?: Point): ArchitectureModel {
   return withView(model, viewId, (_m, v) => {
-    const n = v.nodes.find((x) => x.id === nodeId && x.kind === 'group');
+    // group 또는 크기를 가진 컨테이너 컴포넌트 노드 (Sprint 7)
+    const n = v.nodes.find((x) => x.id === nodeId && (x.kind === 'group' || (x.kind === 'component' && x.width !== undefined)));
     if (!n) return false;
     n.width = Math.max(GROUP_MIN_SIZE, Math.round(size.width));
     n.height = Math.max(GROUP_MIN_SIZE, Math.round(size.height));
@@ -627,4 +641,192 @@ export function mergeImport(
     summary.newRelations++;
   }
   return { model: next, summary };
+}
+
+// ── 배치안 (Sprint 7 · 03 V13 · 04 §6.10) ─────────────────────────────────
+export const MAX_DEPLOYMENT_VIEWS = 5;
+export const VARIANT_MAX = 60;
+export const STRATEGY_MAX_BYTES = 64 * 1024;
+export const STRATEGY_TEMPLATE = [
+  '## 배포 경로', '', '- ', '',
+  '## 환경과 승인', '', '- 운영 배포 승인: ', '',
+  '## 릴리스 방식과 이유', '', '- ', '',
+  '## 성공·중단 기준', '', '- ', '',
+  '## 롤백과 DB 변경', '', '- ', '',
+].join('\n');
+
+export const deploymentViews = (model: ArchitectureModel) => model.views.filter((v) => v.kind === 'deployment');
+
+/** 배치안 이름 검사. 문제가 없으면 undefined */
+export function variantError(model: ArchitectureModel, name: string, exceptViewId?: string): string | undefined {
+  const n = name.trim();
+  if (!n || n.length > VARIANT_MAX) return `배치안 이름은 1~${VARIANT_MAX}자여야 합니다.`;
+  if (deploymentViews(model).some((v) => v.id !== exceptViewId && (v.variant ?? '').trim() === n)) return '같은 이름의 배치안이 있습니다.';
+  return undefined;
+}
+
+const newViewId = (newId: NewId) => newId('view').replace(/^view_/, 'view_dep_');
+
+/** 빈 배치안 추가 (전략은 템플릿으로 시작) */
+export function addDeploymentView(model: ArchitectureModel, variant: string, newId: NewId): { model: ArchitectureModel; viewId: string | null; error?: string } {
+  if (deploymentViews(model).length >= MAX_DEPLOYMENT_VIEWS) return { model, viewId: null, error: `배치안은 최대 ${MAX_DEPLOYMENT_VIEWS}개입니다.` };
+  const error = variantError(model, variant);
+  if (error) return { model, viewId: null, error };
+  const next = cloneModel(model);
+  const viewId = newViewId(newId);
+  next.views.push({ id: viewId, kind: 'deployment', name: 'Deployment', variant: variant.trim(), nodes: [], edges: [], strategyMd: STRATEGY_TEMPLATE });
+  return { model: next, viewId };
+}
+
+export function renameDeploymentView(model: ArchitectureModel, viewId: string, variant: string): { model: ArchitectureModel; error?: string } {
+  const v = getView(model, viewId);
+  if (!v || v.kind !== 'deployment') return { model, error: '배치안을 찾을 수 없습니다.' };
+  const error = variantError(model, variant, viewId);
+  if (error) return { model, error };
+  if (v.variant === variant.trim()) return { model };
+  return { model: withView(model, viewId, (_m, vv) => { vv.variant = variant.trim(); }) };
+}
+
+export function setStrategy(model: ArchitectureModel, viewId: string, strategyMd: string): ArchitectureModel {
+  return withView(model, viewId, (_m, v) => {
+    if (v.kind !== 'deployment' || (v.strategyMd ?? '') === strategyMd) return false;
+    if (strategyMd) v.strategyMd = strategyMd; else delete v.strategyMd;
+  });
+}
+
+/** 배치안 전용 컴포넌트: 이 View에 노드가 있고, 다른 View에는 노드가 없는 deployment 레이어 컴포넌트 */
+function ownComponents(model: ArchitectureModel, viewId: string): Set<string> {
+  const v = getView(model, viewId)!;
+  const ids = new Set<string>();
+  for (const n of v.nodes) {
+    const c = n.componentId ? model.components[n.componentId] : undefined;
+    if (!c || c.layer !== 'deployment') continue;
+    if (model.views.some((o) => o.id !== viewId && o.nodes.some((x) => x.componentId === c.id))) continue;
+    ids.add(c.id);
+  }
+  return ids;
+}
+
+/**
+ * 배치안 복제: deployment 컴포넌트·노드·관계·엣지를 새 id로 복사하고 parentId·관계 끝점을 다시 연결한다.
+ * Logical 컴포넌트(realizes의 대상)는 공유. 결과 모델 크기는 호출 쪽이 V8로 검사한다(modelByteSize).
+ */
+export function duplicateDeploymentView(model: ArchitectureModel, viewId: string, variant: string, newId: NewId): { model: ArchitectureModel; viewId: string | null; error?: string } {
+  const src = getView(model, viewId);
+  if (!src || src.kind !== 'deployment') return { model, viewId: null, error: '배치안을 찾을 수 없습니다.' };
+  if (deploymentViews(model).length >= MAX_DEPLOYMENT_VIEWS) return { model, viewId: null, error: `배치안은 최대 ${MAX_DEPLOYMENT_VIEWS}개입니다.` };
+  const error = variantError(model, variant);
+  if (error) return { model, viewId: null, error };
+  const next = cloneModel(model);
+  const compMap = new Map<string, string>();
+  for (const n of src.nodes) {
+    const c = n.componentId ? next.components[n.componentId] : undefined;
+    if (!c || c.layer !== 'deployment' || compMap.has(c.id)) continue;
+    const copy = structuredClone(c);
+    copy.id = newId('cmp');
+    next.components[copy.id] = copy;
+    compMap.set(c.id, copy.id);
+  }
+  const relMap = new Map<string, string>();
+  for (const r of Object.values(model.relations)) {
+    const from = compMap.get(r.from) ?? null;
+    const to = compMap.get(r.to) ?? null;
+    if (!from && !to) continue;                                      // 이 배치안과 무관
+    if (r.type !== 'realizes' && (!from || !to)) continue;            // 배치안 밖으로 이어진 호출선은 복사하지 않음
+    const copy = structuredClone(r);
+    copy.id = newId('rel');
+    copy.from = from ?? r.from;
+    copy.to = to ?? r.to;                                             // realizes의 Logical 끝점은 그대로
+    next.relations[copy.id] = copy;
+    relMap.set(r.id, copy.id);
+  }
+  const nodeMap = new Map(src.nodes.map((n) => [n.id, newId('nd')]));
+  const newViewIdValue = newViewId(newId);
+  next.views.push({
+    id: newViewIdValue, kind: 'deployment', name: src.name, variant: variant.trim(),
+    ...(src.strategyMd ? { strategyMd: src.strategyMd } : {}),
+    nodes: src.nodes.map((n) => {
+      const copy: ViewNode = structuredClone(n);
+      copy.id = nodeMap.get(n.id)!;
+      if (n.parentId) copy.parentId = nodeMap.get(n.parentId);
+      if (n.componentId) copy.componentId = compMap.get(n.componentId) ?? n.componentId;
+      return copy;
+    }),
+    edges: src.edges.filter((e) => relMap.has(e.relationId)).map((e) => ({ ...structuredClone(e), id: newId('ed'), relationId: relMap.get(e.relationId)! })),
+  });
+  return { model: next, viewId: newViewIdValue };
+}
+
+/** 배치안 삭제: View와, 다른 View에서 쓰지 않는 deployment 컴포넌트·그 관계(realizes 포함)를 지운다 */
+export function removeDeploymentView(model: ArchitectureModel, viewId: string): ArchitectureModel {
+  const v = getView(model, viewId);
+  if (!v || v.kind !== 'deployment') return model;
+  const own = ownComponents(model, viewId);
+  const next = cloneModel(model);
+  next.views = next.views.filter((x) => x.id !== viewId);
+  for (const id of own) deleteComponent(next, id);
+  return next;
+}
+
+/** 삭제 확인 창용 요약 */
+export function deploymentViewSummary(model: ArchitectureModel, viewId: string) {
+  const v = getView(model, viewId);
+  if (!v) return null;
+  const own = ownComponents(model, viewId);
+  const comps = v.nodes.map((n) => (n.componentId ? model.components[n.componentId] : undefined)).filter((c): c is Component => Boolean(c));
+  const implementers = comps.filter((c) => Object.values(model.relations).some((r) => r.type === 'realizes' && r.from === c.id));
+  const realized = new Set(Object.values(model.relations).filter((r) => r.type === 'realizes' && own.has(r.from)).map((r) => r.to));
+  return {
+    variant: v.variant ?? '',
+    components: comps.length,
+    ownComponents: own.size,
+    relations: Object.values(model.relations).filter((r) => own.has(r.from) || own.has(r.to)).length,
+    implementers: implementers.length,
+    realizedLogical: realized.size,
+    unrealizedLogical: Object.values(model.components).filter((c) => c.layer === 'logical' && !realized.has(c.id)).map((c) => c.name),
+  };
+}
+
+// ── realizes (Sprint 7 · 03 V2) ─────────────────────────────────────────
+/** 구현체(registry realizes) → Logical 컴포넌트. on=false면 해제. 거부되면 입력 모델 그대로 */
+export function setRealizes(model: ArchitectureModel, registry: TypeRegistry | null, fromId: string, toId: string, on: boolean, newId: NewId): ArchitectureModel {
+  const from = model.components[fromId], to = model.components[toId];
+  if (!from || !to) return model;
+  const existing = Object.values(model.relations).find((r) => r.type === 'realizes' && r.from === fromId && r.to === toId);
+  if (!on) {
+    if (!existing) return model;
+    const next = cloneModel(model);
+    delete next.relations[existing.id];
+    return next;
+  }
+  if (existing || !registry?.types[from.type]?.realizes || to.layer !== 'logical') return model;
+  const next = cloneModel(model);
+  const id = newId('rel');
+  next.relations[id] = { id, type: 'realizes', from: fromId, to: toId, requirementIds: [] };
+  return next;
+}
+
+/** 구현체가 구현하는 Logical 컴포넌트 id 목록 */
+export const realizesTargets = (model: ArchitectureModel, componentId: string) =>
+  Object.values(model.relations).filter((r) => r.type === 'realizes' && r.from === componentId).map((r) => r.to);
+
+export type RunLocation = { viewId: string; variant: string; nodeId: string; implementer: string; container: string | null; instances: number | null };
+
+/** Logical 컴포넌트의 배치안별 실행 위치 (04 §6.10: "현재 · PaaS → Railway / backend (node) ×1") */
+export function runLocations(model: ArchitectureModel, logicalId: string): RunLocation[] {
+  const out: RunLocation[] = [];
+  const impls = Object.values(model.relations).filter((r) => r.type === 'realizes' && r.to === logicalId).map((r) => r.from);
+  for (const v of deploymentViews(model)) {
+    const byId = new Map(v.nodes.map((n) => [n.id, n]));
+    for (const n of v.nodes) {
+      if (!n.componentId || !impls.includes(n.componentId)) continue;
+      const c = model.components[n.componentId];
+      let parent = n.parentId ? byId.get(n.parentId) : undefined;
+      // 가장 가까운 컨테이너 컴포넌트(VM·플랫폼 등)의 이름
+      while (parent && !parent.componentId) parent = parent.parentId ? byId.get(parent.parentId) : undefined;
+      const instances = typeof c.properties?.instances === 'number' ? (c.properties.instances as number) : null;
+      out.push({ viewId: v.id, variant: v.variant ?? '', nodeId: n.id, implementer: c.name, container: parent?.componentId ? model.components[parent.componentId]?.name ?? null : null, instances });
+    }
+  }
+  return out;
 }

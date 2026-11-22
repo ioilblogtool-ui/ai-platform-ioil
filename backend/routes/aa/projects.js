@@ -251,7 +251,9 @@ router.get('/:projectId/architecture', wrap(async (req, res) => {
     if (vErr) throw vErr;
     if (v) baseVersion = { id: v.id, label: v.label, versionNo: v.version_no };
   }
-  res.json({ data: { model, revision: data.revision, baseVersion, updatedAt: data.updated_at }, ...(warnings.length ? { warnings } : {}) });
+  // V11(배치안의 Process 위치)은 저장된 값이 아니라 조회할 때마다 다시 계산해 돌려준다 (Sprint 7)
+  const all = [...warnings, ...validateModel(model).warnings.filter((w) => w.rule === 'V11')];
+  res.json({ data: { model, revision: data.revision, baseVersion, updatedAt: data.updated_at }, ...(all.length ? { warnings: all } : {}) });
 }));
 
 // ── Draft 저장 (낙관적 잠금) ──────────────────────────────────

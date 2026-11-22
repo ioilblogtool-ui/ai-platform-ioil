@@ -52,7 +52,8 @@ export interface View {
   nodes: ViewNode[];
   edges: ViewEdge[];
   viewport?: { x: number; y: number; zoom: number };
-  variant?: string;             // deployment 배치안 이름 (Phase 2)
+  variant?: string;             // deployment 배치안 이름 (Sprint 7: 필수 1~60자)
+  strategyMd?: string;          // deployment 배포 전략 Markdown (Sprint 7, 64KB)
 }
 
 export interface ViewNode {
@@ -170,6 +171,10 @@ export interface PropertyDef {
 export interface TypeDef {
   label: string; category: string; layer: ComponentLayer; icon: string;
   nodeKind: NodeKind; views: ViewKind[]; aliases?: string[]; properties: PropertyDef[];
+  /** Sprint 7: 자식을 담는 컴포넌트 (배치안의 환경·구역·플랫폼·VM) */
+  container?: boolean;
+  /** Sprint 7: realizes 관계의 시작(구현체)이 될 수 있음 */
+  realizes?: boolean;
 }
 
 export interface TypeRegistry {

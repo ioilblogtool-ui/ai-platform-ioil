@@ -56,6 +56,8 @@ function canonModel(model) {
   const views = (m.views ?? []).map((v) => {
     const out = { id: v.id, kind: v.kind, name: v.name };
     if (v.variant !== undefined && v.variant !== null) out.variant = v.variant;
+    // Sprint 7: 배포 전략도 의미 변경. 빈 문자열은 없는 것과 같다 → 전략 없는 모델의 해시는 Sprint 6과 같다
+    if (typeof v.strategyMd === 'string' && v.strategyMd !== '') out.strategyMd = v.strategyMd;
     out.nodes = (v.nodes ?? []).map(canonNode).sort(byId);
     out.edges = (v.edges ?? []).map(canonEdge).sort(byId);
     return out;
