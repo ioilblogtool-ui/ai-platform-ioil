@@ -16,6 +16,7 @@ export const {
   createRequirement,
   updateRequirement,
   deleteRequirement,
+  exportReadme,
   getDraft,
   saveDraft,
   getTypeRegistry,

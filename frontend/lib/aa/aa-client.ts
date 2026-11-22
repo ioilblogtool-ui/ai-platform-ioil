@@ -5,7 +5,7 @@
 // AA는 { status, code, details }를 보존하는 전용 래퍼를 쓴다 (409 충돌 처리에 currentRevision 필요).
 import type {
   AaProject, AaProjectDetail, AaProjectSummary, ArchitectureModel, DraftResponse,
-  ListProjectsParams, ListRequirementsParams, ProjectStatus, Requirement, RequirementCreate,
+  ListProjectsParams, ListRequirementsParams, ProjectStatus, ReadmeExportRequest, ReadmeExportResult, Requirement, RequirementCreate,
   RequirementUpdate, SaveDraftResult, TypeRegistry, ValidationIssue,
 } from './architecture-types';
 
@@ -98,6 +98,11 @@ export function createAaClient(deps: AaClientDeps) {
     },
     async deleteProject(projectId: string, confirmName: string) {
       await request<void>(`${p(projectId)}${deps.buildQuery({ confirm: confirmName })}`, { method: 'DELETE' });
+    },
+
+    // ── 내보내기 (Sprint 4: readme-md) — 422는 AaApiError(details: SensitiveScanDetails) ──
+    async exportReadme(projectId: string, body: ReadmeExportRequest) {
+      return (await request<{ data: ReadmeExportResult }>(`${p(projectId)}/export`, json('POST', body))).data;
     },
 
     // ── 요구사항 ──

@@ -20,6 +20,7 @@ const router = express.Router();
 router.use(requireAuth);
 router.param('projectId', loadProject);
 router.use('/:projectId/requirements', require('./requirements'));
+router.use('/:projectId/export', require('./export'));
 
 const README_MAX_BYTES = 64 * 1024;
 const DESCRIPTION_MAX = 2000;

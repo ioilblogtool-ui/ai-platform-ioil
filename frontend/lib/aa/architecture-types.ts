@@ -150,6 +150,31 @@ export interface TypeRegistry {
   types: Record<string, TypeDef>;
 }
 
+// ── README.md 내보내기 (Sprint 4 Step 5) ──
+export type ReadmeSections = { overview: boolean; logicalDiagram: boolean; nfr: boolean };
+export interface ReadmeExportRequest {
+  format: 'readme-md';
+  source?: { type: 'latest' | 'draft' };
+  sections?: Partial<ReadmeSections>;
+  acknowledgedScan?: string | null;
+}
+export interface ReadmeExportResult {
+  filename: string;
+  contentType: string;
+  content: string;
+  contentHash: string;
+  sections: ReadmeSections;
+  basis: { source: 'draft'; revision: number; readAt: string };
+  approxTokens: number;
+  acknowledgedWarnings?: number;
+}
+/** 422 SENSITIVE_DATA_DETECTED의 details */
+export interface SensitiveScanDetails {
+  issues: { rule: string; path: string; sample: string }[];
+  confirmable: boolean;
+  scanId: string | null;
+}
+
 export type RequirementKind = 'fr' | 'nfr';
 export type RequirementStatus = 'active' | 'deprecated';
 export type RequirementPriority = 'must' | 'should' | 'could';

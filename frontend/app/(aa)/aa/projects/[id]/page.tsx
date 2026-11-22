@@ -12,6 +12,7 @@ import { AaApiError, getAaProject, getDraft, listRequirements, updateAaProject }
 import type { AaProjectDetail, DraftResponse, Requirement } from '@/lib/aa/architecture-types';
 import { miniCanvasLayout, unmappedNfrCount } from '@/lib/aa/overview';
 import MiniCanvas from '@/components/aa/MiniCanvas';
+import ReadmeExportModal from '@/components/aa/ReadmeExportModal';
 
 const README_MAX_BYTES = 64 * 1024;
 const muted: CSSProperties = { color: '#9a98a8', fontSize: 13 };
@@ -39,6 +40,7 @@ function ProjectOverview({ id }: { id: string }) {
   const [draft, setDraft] = useState<Loaded<DraftResponse>>({ status: 'loading' });
   const [requirements, setRequirements] = useState<Requirement[] | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [showReadme, setShowReadme] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -72,6 +74,7 @@ function ProjectOverview({ id }: { id: string }) {
       <PageHeader title={name || '프로젝트 개요'}
         breadcrumbs={[{ label: 'AA Workbench', href: '/aa/projects' }]}
         actions={<div style={{ display: 'flex', gap: 8 }}>
+          <Button onClick={() => setShowReadme(true)} data-testid="aa-overview-readme">README.md</Button>
           <Button onClick={() => router.push(`${base}/requirements`)}>요구사항</Button>
           <Button variant="primary" onClick={() => router.push(`${base}/architecture`)}>Studio 열기 ▸</Button>
         </div>}
@@ -92,6 +95,7 @@ function ProjectOverview({ id }: { id: string }) {
           </Card>
         </div>
       </main>
+      {showReadme && <ReadmeExportModal projectId={id} projectName={name} onClose={() => setShowReadme(false)} />}
     </>
   );
 }

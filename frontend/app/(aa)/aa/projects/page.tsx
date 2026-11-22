@@ -7,6 +7,7 @@ import PageHeader from '@/components/PageHeader';
 import Button from '@/components/Button';
 import Card, { EmptyState } from '@/components/Card';
 import NewProjectModal from '@/components/aa/NewProjectModal';
+import ReadmeExportModal from '@/components/aa/ReadmeExportModal';
 import { listAaProjects, AaApiError } from '@/lib/aa/architecture-api';
 import type { AaProjectSummary } from '@/lib/aa/architecture-types';
 
@@ -25,6 +26,16 @@ export default function AaProjectsPage() {
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [showNew, setShowNew] = useState(false);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<AaProjectSummary | null>(null);
+
+  // 행 메뉴 바깥을 누르면 닫는다
+  useEffect(() => {
+    if (!menuFor) return;
+    const close = () => setMenuFor(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [menuFor]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -68,7 +79,7 @@ export default function AaProjectsPage() {
           )}
           {!error && !!projects?.length && (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><th style={th}>이름</th><th style={th}>Draft</th><th style={th}>Draft 수정</th><th style={th}>만든 날</th></tr></thead>
+              <thead><tr><th style={th}>이름</th><th style={th}>Draft</th><th style={th}>Draft 수정</th><th style={th}>만든 날</th><th style={{ ...th, width: 44 }} aria-label="메뉴" /></tr></thead>
               <tbody>
                 {projects.map((p) => (
                   <tr key={p.id} onClick={() => router.push(`/aa/projects/${p.id}`)} style={{ cursor: 'pointer' }}
@@ -81,6 +92,19 @@ export default function AaProjectsPage() {
                     <td style={{ ...td, color: '#9a98a8' }}>rev {p.draftRevision ?? '–'}</td>
                     <td style={{ ...td, color: '#9a98a8' }}>{ago(p.draftUpdatedAt)}</td>
                     <td style={{ ...td, color: '#5a5870' }}>{new Date(p.createdAt).toLocaleDateString('ko-KR')}</td>
+                    <td style={{ ...td, position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+                      <button aria-label={`${p.name} 메뉴`} aria-haspopup="menu" aria-expanded={menuFor === p.id} data-testid={`aa-project-menu-${p.id}`}
+                        onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === p.id ? null : p.id); }}
+                        style={{ background: 'none', border: 'none', color: '#9a98a8', cursor: 'pointer', fontSize: 16, padding: '2px 8px', borderRadius: 6 }}>⋯</button>
+                      {menuFor === p.id && (
+                        <div role="menu" style={{ position: 'absolute', right: 12, top: 40, zIndex: 10, minWidth: 180, padding: 4, borderRadius: 8, background: '#16161a', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+                          <button role="menuitem" data-testid="aa-menu-readme" onClick={() => { setMenuFor(null); setExporting(p); }}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 6, background: 'none', border: 'none', color: 'rgba(255,255,255,0.9)', cursor: 'pointer', fontSize: 13 }}>
+                            README.md 내보내기
+                          </button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -88,6 +112,7 @@ export default function AaProjectsPage() {
           )}
         </Card>
       </div>
+      {exporting && <ReadmeExportModal projectId={exporting.id} projectName={exporting.name} onClose={() => setExporting(null)} />}
       {showNew && <NewProjectModal onClose={() => setShowNew(false)} onCreated={(id) => router.push(`/aa/projects/${id}/architecture`)} />}
     </>
   );
