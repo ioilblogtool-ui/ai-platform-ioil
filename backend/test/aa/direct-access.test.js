@@ -15,7 +15,7 @@ describe('AA direct browser access is blocked', { skip: dbSkipReason }, () => {
 
   const denied = (r) => r.error && r.error.code === '42501';
 
-  for (const table of ['aa_projects', 'aa_architecture_drafts', 'aa_requirements', 'aa_reviews', 'aa_review_answers']) {
+  for (const table of ['aa_projects', 'aa_architecture_drafts', 'aa_requirements', 'aa_reviews', 'aa_review_answers', 'aa_architecture_versions']) {
     it(`${table} 읽기 거부`, async () => {
       assert.ok(denied(await browser.from(table).select('*').limit(1)));
     });
@@ -40,6 +40,25 @@ describe('AA direct browser access is blocked', { skip: dbSkipReason }, () => {
       p_bundle_md: null, p_tool: 'Claude', p_answer_md: 'x', p_client_request_id: null,
     })));
     const { count } = await aaDb().from('aa_reviews').select('id', { count: 'exact', head: true }).eq('project_id', project.id);
+    assert.equal(count, 0);
+  });
+
+  it('P2b: 버전 쓰기와 RPC aa_publish_version·aa_restore_version·aa_create_manual_review_at 호출 거부 (Sprint 6)', async () => {
+    assert.ok(denied(await browser.from('aa_architecture_versions').insert({
+      project_id: project.id, user_id: USER_A, version_no: 1, label: 'v1.0', model: emptyModel(), model_hash: 'h', source_revision: 1,
+    })));
+    assert.ok(denied(await browser.rpc('aa_publish_version', {
+      p_project: project.id, p_user: USER_A, p_base_revision: 1, p_expected_latest: null, p_label: 'v1.0', p_note: null,
+      p_model_hash: 'h', p_requirements_snapshot: {}, p_diff_summary: null,
+    })));
+    assert.ok(denied(await browser.rpc('aa_restore_version', {
+      p_project: project.id, p_user: USER_A, p_version: project.id, p_base_revision: 1, p_model: emptyModel(),
+    })));
+    assert.ok(denied(await browser.rpc('aa_create_manual_review_at', {
+      p_project: project.id, p_user: USER_A, p_draft_revision: 1, p_version: null, p_bundle_id: null, p_bundle_scope: null,
+      p_bundle_md: null, p_tool: 'Claude', p_answer_md: 'x', p_client_request_id: null,
+    })));
+    const { count } = await aaDb().from('aa_architecture_versions').select('id', { count: 'exact', head: true }).eq('project_id', project.id);
     assert.equal(count, 0);
   });
 
