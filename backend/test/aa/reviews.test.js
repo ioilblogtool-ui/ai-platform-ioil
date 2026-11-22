@@ -40,7 +40,7 @@ describe('AA manual reviews', { skip: dbSkipReason }, () => {
     assert.equal(item.source, 'external_ai:Claude');
     assert.deepEqual(item.target, { type: 'draft', revision: 1 });
     assert.equal(item.bundleLinked, true);
-    assert.equal(item.scopeLabel, '프로젝트 전체');
+    assert.equal(item.scopeLabel, '프로젝트 전체 (Logical)');
     assert.equal(item.answerCount, 1);
     const detail = await api(A).get(`${base(p.id)}/${res.body.data.id}`);
     assert.equal(detail.body.data.bundleMd, bundle.bundleMd);

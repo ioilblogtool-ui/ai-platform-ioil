@@ -13,6 +13,8 @@ import BasisSelect, { toSource, type BasisValue } from '@/components/aa/BasisSel
 
 const SECTION_LABELS: [keyof ReadmeSections, string][] = [
   ['overview', '프로젝트 개요'], ['logicalDiagram', 'Logical 구성도 (Mermaid)'], ['nfr', '비기능 요구사항 (NFR)'],
+  // Sprint 7: 배치안이 있을 때만 내용이 생긴다 (기본 꺼짐)
+  ['deployment', '배포 구성 (배치안)'], ['deployStrategy', '배포 전략'],
 ];
 
 async function requestExport(projectId: string, sections: ReadmeSections, basis: BasisValue, ack: string | null): Promise<ExportOutcome> {
@@ -29,7 +31,7 @@ async function requestExport(projectId: string, sections: ReadmeSections, basis:
 }
 
 export default function ReadmeExportModal({ projectId, projectName, onClose }: { projectId: string; projectName: string; onClose: () => void }) {
-  const [sections, setSections] = useState<ReadmeSections>({ overview: true, logicalDiagram: true, nfr: true });
+  const [sections, setSections] = useState<ReadmeSections>({ overview: true, logicalDiagram: true, nfr: true, deployment: false, deployStrategy: false });
   const [basis, setBasis] = useState<BasisValue>('latest');   // RDM-02: 기본은 최신 발행본
   const [preview, setPreview] = useState<ReadmeExportResult | null>(null);
   const [scan, setScan] = useState<SensitiveScanDetails | null>(null);

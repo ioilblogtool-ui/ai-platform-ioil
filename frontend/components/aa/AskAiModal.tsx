@@ -166,7 +166,7 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
   }
 
   const scopeOptions: [ScopeType, string, boolean][] = [
-    ['project', '프로젝트 전체', true],
+    ['project', '프로젝트 전체 (Logical)', true],
     ['view', 'Logical View', true],
     ['components', `선택한 컴포넌트와 이웃${selectedComponentIds.length ? ` (${selectedComponentIds.length})` : ''}`, selectedComponentIds.length > 0],
     ['requirement', '요구사항 하나', requirements.length > 0],

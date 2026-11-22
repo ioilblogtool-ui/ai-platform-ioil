@@ -17,8 +17,11 @@ describe('sample-reports template (offline)', () => {
     assert.ok(!/https?:\/\//.test(JSON.stringify(model) + sample.readmeMd));
   });
 
-  it('has 4 components, 1 group with 2 members and the 4 listed relations', () => {
-    const model = sample.model();
+  it('has 4 Logical components, 1 group with 2 members and the 4 listed relations (deployment views: deployment-export.test.js)', () => {
+    const full = sample.model();
+    // Sprint 7: 배치안 컴포넌트·관계를 뺀 Logical 부분만 비교
+    const model = { ...full, components: Object.fromEntries(Object.entries(full.components).filter(([, c]) => c.layer === 'logical')) };
+    model.relations = Object.fromEntries(Object.entries(full.relations).filter(([, r]) => model.components[r.from] && model.components[r.to]));
     const names = (id) => model.components[id].name;
     assert.deepEqual(Object.values(model.components).map((c) => `${c.name}:${c.type}`).sort(),
       ['Auth:external', 'Reports API:service', 'Reports DB:database', 'Web App:client']);

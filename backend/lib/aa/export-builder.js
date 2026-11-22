@@ -37,7 +37,7 @@ function resolveScope(n, scope, requirements) {
   const all = new Set(n.components.map((c) => c.ref));
   const byRef = new Map(n.components.map((c) => [c.ref, c]));
   const type = scope?.type ?? 'project';
-  if (type === 'project') return { refs: all, label: '프로젝트 전체', reqCodes: null };
+  if (type === 'project') return { refs: all, label: '프로젝트 전체 (Logical)', reqCodes: null };   // Sprint 7 Q6: 배치안은 담지 않음을 밝힌다
   if (type === 'view') {
     if (scope.viewId !== 'view_logical') return { error: 'view' };
     return { refs: new Set(n.components.filter((c) => c.inLogical).map((c) => c.ref)), label: 'Logical View', reqCodes: null };

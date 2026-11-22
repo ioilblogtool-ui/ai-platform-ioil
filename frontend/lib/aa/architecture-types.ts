@@ -198,7 +198,7 @@ export type ExportBasis =
   | { source: 'version'; versionId: string; label: string; versionNo: number; publishedAt: string; readAt: string };
 
 // ── README.md 내보내기 (Sprint 4 Step 5) ──
-export type ReadmeSections = { overview: boolean; logicalDiagram: boolean; nfr: boolean };
+export type ReadmeSections = { overview: boolean; logicalDiagram: boolean; nfr: boolean; deployment: boolean; deployStrategy: boolean };
 export interface ReadmeExportRequest {
   format: 'readme-md';
   source?: ExportSource;

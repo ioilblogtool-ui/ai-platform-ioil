@@ -73,7 +73,8 @@ describe('model-canon: 의미 해시', () => {
 
 describe('graph-diff: 발행 요약', () => {
   it('summarizes the first version', () => {
-    assert.deepEqual(summarize(null, { model: base(), snapshot: {} }), { hashVersion: 1, first: true, components: 4, relations: 4 });
+    const m = base();
+    assert.deepEqual(summarize(null, { model: m, snapshot: {} }), { hashVersion: 1, first: true, components: Object.keys(m.components).length, relations: Object.keys(m.relations).length });
   });
 
   it('counts each kind of change', () => {

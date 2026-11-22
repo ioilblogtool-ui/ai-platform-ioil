@@ -4,11 +4,13 @@
 const { normalizeModel } = require('./normalize');
 const { basisText, basisFileTag } = require('./export-basis');
 const { toMermaidFlowchart } = require('./mermaid-export');
+const { deploymentSectionLines, strategySectionLines } = require('./deployment-export');
 
-const DEFAULT_SECTIONS = Object.freeze({ overview: true, logicalDiagram: true, nfr: true });
+// Sprint 7: deployment(배치안 구성도·구현 대상)·deployStrategy(배포 전략)는 기본 꺼짐, 배치안이 없으면 내용 없음
+const DEFAULT_SECTIONS = Object.freeze({ overview: true, logicalDiagram: true, nfr: true, deployment: false, deployStrategy: false });
 const SECTION_KEYS = Object.keys(DEFAULT_SECTIONS);
 
-/** 요청의 sections → 세 키만 남긴 boolean 객체 (그 밖의 키는 무시, 없는 키는 기본 켬) */
+/** 요청의 sections → 정해진 키만 남긴 boolean 객체 (그 밖의 키는 무시, 없는 키는 기본값) */
 function normalizeSections(input) {
   const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   return Object.fromEntries(SECTION_KEYS.map((k) => [k, src[k] === undefined ? DEFAULT_SECTIONS[k] : src[k] === true]));
@@ -85,6 +87,9 @@ function buildReadme({ project, model, revision, basis, requirements = [], secti
     else out.push('_Logical View에 그려진 컴포넌트가 없습니다._', '');
   }
 
+  // ⑤ 배포 구성 (Sprint 7, 선택) — 배치안별 구성도·구현 대상
+  if (on.deployment) out.push(...deploymentSectionLines(model));
+
   // ⑦ 설계 근거 — 이번 단계는 NFR 목표·측정 방법만 (ADR은 Phase 3)
   if (on.nfr) {
     out.push('## 비기능 요구사항 (NFR)', '');
@@ -98,6 +103,9 @@ function buildReadme({ project, model, revision, basis, requirements = [], secti
       out.push('_등록된 NFR이 없습니다._', '');
     }
   }
+
+  // ⑥ 배포 전략 (Sprint 7, 선택, DEP-03)
+  if (on.deployStrategy) out.push(...strategySectionLines(model));
 
   return {
     body: `${out.join('\n').trimEnd()}\n`,

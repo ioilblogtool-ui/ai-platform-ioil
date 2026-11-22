@@ -19,7 +19,7 @@ describe('buildReadme (offline)', () => {
 
   it('writes the fixed order with every optional section on by default', () => {
     const { body, filename, sections } = buildReadme({ project, model: sampleWithNfr(), revision: 7, requirements: [NFR] });
-    assert.deepEqual(sections, { overview: true, logicalDiagram: true, nfr: true });
+    assert.deepEqual(sections, { overview: true, logicalDiagram: true, nfr: true, deployment: false, deployStrategy: false }, 'Sprint 7 deployment sections default off');
     assert.equal(filename, 'README_ai-platform-reports-샘플_draft-rev7.md');
     const headings = body.split('\n').filter((l) => /^#{1,2} /.test(l));
     assert.deepEqual(headings, ['# AI Platform Reports (샘플)', '## 프로젝트 개요', '## 아키텍처 요약', '## 구성도 (Logical)', '## 비기능 요구사항 (NFR)']);
@@ -33,7 +33,7 @@ describe('buildReadme (offline)', () => {
   });
 
   it('omits switched-off sections from the output and keeps the fixed ones', () => {
-    const { body } = buildReadme({ project, model: sample.model(), revision: 1, sections: { overview: false, logicalDiagram: false, nfr: false, deployment: true } });
+    const { body } = buildReadme({ project, model: sample.model(), revision: 1, sections: { overview: false, logicalDiagram: false, nfr: false, unknown: true } });
     const headings = body.split('\n').filter((l) => /^#{1,2} /.test(l));
     assert.deepEqual(headings, ['# AI Platform Reports (샘플)', '## 아키텍처 요약']);
     assert.ok(!body.includes('```mermaid'));
@@ -53,8 +53,8 @@ describe('buildReadme (offline)', () => {
   });
 
   it('normalizes section flags and slugs', () => {
-    assert.deepEqual(normalizeSections({ overview: 'yes', nfr: false, x: true }), { overview: false, logicalDiagram: true, nfr: false });
-    assert.deepEqual(normalizeSections(null), { overview: true, logicalDiagram: true, nfr: true });
+    assert.deepEqual(normalizeSections({ overview: 'yes', nfr: false, x: true }), { overview: false, logicalDiagram: true, nfr: false, deployment: false, deployStrategy: false });
+    assert.deepEqual(normalizeSections(null), { overview: true, logicalDiagram: true, nfr: true, deployment: false, deployStrategy: false });
     assert.equal(slugify('  Hello  World!!  '), 'hello-world');
     assert.match(readmeFooter(new Date('2026-11-22T00:00:00Z')), /2026-11-22T00:00:00\.000Z/);
   });
@@ -94,7 +94,7 @@ describe('POST /projects/:id/export', { skip: dbSkipReason }, () => {
     const off = await api(A).post(url(p.id), body({ sections: { overview: false, logicalDiagram: false, nfr: false } }));
     assert.equal(off.status, 200);
     assert.ok(!off.body.data.content.includes('## 프로젝트 개요'));
-    assert.deepEqual(off.body.data.sections, { overview: false, logicalDiagram: false, nfr: false });
+    assert.deepEqual(off.body.data.sections, { overview: false, logicalDiagram: false, nfr: false, deployment: false, deployStrategy: false });
     for (const format of ['model-json', 'pdf', undefined]) {   // ai-md·ai-json·mermaid는 Sprint 5에서 지원
       const r = await api(A).post(url(p.id), { format });
       assert.equal(r.status, 400);

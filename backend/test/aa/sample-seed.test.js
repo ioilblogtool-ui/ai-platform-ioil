@@ -48,7 +48,7 @@ describe('AA sample project requirement seed', { skip: dbSkipReason }, () => {
     assert.deepEqual(model.components.cmp_reports_db.requirementIds, [byCode['NFR-002']]);
     assert.deepEqual(model.components.cmp_web_app.requirementIds, [byCode['FR-001']]);
     assert.deepEqual(model.relations.rel_web_api.requirementIds, [byCode['FR-001']]);
-    assert.equal(Object.keys(model.relations).length, 4, 'Sprint 4 S4-6 관계 수 유지');
+    assert.equal(Object.values(model.relations).filter((r) => r.type === 'calls' && model.components[r.from].layer === 'logical').length, 4, 'Sprint 4 S4-6 Logical 관계 수 유지');
 
     // 다음 요구사항 코드는 시드 다음 번호
     const next = await api(A).post(`/api/aa/projects/${id}/requirements`, { kind: 'nfr', title: '추가' });
