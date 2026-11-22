@@ -15,6 +15,17 @@ import NoteNode from './NoteNode';
 import RelationEdge from './RelationEdge';
 import PropertyInspector from './PropertyInspector';
 import ImportMermaidModal from './ImportMermaidModal';
+import AskAiModal from '../AskAiModal';
+import PasteAnswerModal from '../PasteAnswerModal';
+import type { ArchitectureModel } from '@/lib/aa/architecture-types';
+
+/** 현재 View에서 선택한 노드 중 컴포넌트 노드의 componentId (Ask AI 범위) */
+function selectedComponentIds(model: ArchitectureModel | null, viewId: string, nodeIds: string[]): string[] {
+  const view = model?.views.find((v) => v.id === viewId);
+  if (!view || !nodeIds.length) return [];
+  const picked = new Set(nodeIds);
+  return [...new Set(view.nodes.filter((n) => picked.has(n.id) && n.kind === 'component' && n.componentId).map((n) => n.componentId!))];
+}
 import type { InspectorEdits } from './SchemaForm';
 import { CATEGORY_COLOR, DND_MIME, paletteItems, type PaletteItem } from './palette-meta';
 
@@ -80,7 +91,8 @@ function Studio({ projectId }: { projectId: string }) {
   const [paletteOpen, setPaletteOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
-  const [importNotice, setImportNotice] = useState<string | null>(null);
+  const [importNotice, setImportNotice] = useState<string | null>(null);   // 하단 토스트 (가져오기·리뷰 저장 안내)
+  const [modal, setModal] = useState<null | 'askai' | 'paste'>(null);
 
   const edits = useMemo(() => createInspectorEdits(), [projectId]);
   useEffect(() => {
@@ -200,6 +212,16 @@ function Studio({ projectId }: { projectId: string }) {
         <button onClick={() => { edits.flush(); setImportNotice(null); setImportOpen(true); }} style={btn()} data-testid="aa-import-open"
           disabled={!s.model || Boolean(s.recovery) || s.saveState === 'loading'} title="Mermaid flowchart를 붙여 넣어 노드·관계 만들기">
           가져오기
+        </button>
+        <button onClick={() => { edits.flush(); setModal('askai'); }} style={btn()} data-testid="aa-askai-open"
+          disabled={!s.model || s.saveState === 'loading'} title="외부 AI에 붙여넣을 검토 자료 · Mermaid 내보내기">
+          ⤓ 내보내기
+        </button>
+        <button onClick={() => setModal('paste')} style={btn()} data-testid="aa-paste-open" title="외부 AI 답변을 리뷰로 저장">
+          답변 붙여넣기
+        </button>
+        <button onClick={() => router.push(`/aa/projects/${projectId}/reviews`)} style={btn()} data-testid="aa-reviews-open">
+          리뷰
         </button>
         <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }} data-testid="aa-revision">Draft · rev {s.baseRevision || '–'}</span>
         <div style={{ flex: 1 }} />
@@ -326,6 +348,16 @@ function Studio({ projectId }: { projectId: string }) {
           flushEdits={() => edits.flush()}
           onApplied={() => { setImportNotice(null); setTimeout(() => fitView({ maxZoom: 1, duration: 200 }), 50); }}
         />
+      )}
+      {modal === 'askai' && (
+        <AskAiModal projectId={projectId} projectName={s.projectName}
+          selectedComponentIds={selectedComponentIds(s.model, s.viewId, s.selectedNodeIds)}
+          unsaved={s.saveState === 'dirty' || s.saveState === 'error' || s.saveState === 'saving'}
+          onClose={() => setModal(null)} />
+      )}
+      {modal === 'paste' && (
+        <PasteAnswerModal projectId={projectId} onClose={() => setModal(null)}
+          onSaved={(r) => { setModal(null); setImportNotice(r.existing ? '이미 저장된 리뷰입니다.' : '리뷰를 저장했습니다. [리뷰]에서 볼 수 있습니다.'); }} />
       )}
       {(s.importUndo || importNotice) && (
         <div role="status" data-testid="aa-import-toast" style={{ position: 'fixed', left: '50%', bottom: 24, transform: 'translateX(-50%)', zIndex: 30, padding: '10px 14px', borderRadius: 10, background: '#16161a', border: '1px solid rgba(200,169,110,0.4)', color: 'rgba(255,255,255,0.9)', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>

@@ -168,6 +168,71 @@ export interface ReadmeExportResult {
   approxTokens: number;
   acknowledgedWarnings?: number;
 }
+// ── Ask AI 번들 (Sprint 5 Step 1) ──
+export type AskAiFormat = 'ai-md' | 'ai-json' | 'mermaid';
+export type AskAiTemplate = 'design-review' | 'failure-scenarios' | 'adr-draft' | 'nfr-validation' | 'cost-estimate' | 'explain' | 'custom';
+export type AskAiScope =
+  | { type: 'project' }
+  | { type: 'view'; viewId: 'view_logical' }
+  | { type: 'components'; componentIds: string[] }
+  | { type: 'requirement'; requirementId: string };
+export interface AskAiExportRequest {
+  format: AskAiFormat;
+  source?: { type: 'latest' | 'draft' };
+  scope?: AskAiScope;
+  template?: AskAiTemplate;
+  question?: string;
+  noteIds?: [];
+  acknowledgedScan?: string | null;
+}
+export interface AskAiExportResult {
+  filename: string;
+  contentType: string;
+  content: string;
+  contentHash: string;
+  basis: { source: 'draft'; revision: number; readAt: string };
+  approxTokens: number;
+  bundleId?: string;
+  scopeLabel?: string;
+  template?: AskAiTemplate;
+  omitted?: { components: number };
+  counts?: { components: number; relations: number };
+  acknowledgedWarnings?: number;
+}
+
+// ── 외부 AI 수동 리뷰 (Sprint 5 Step 3) ──
+/** 답변 붙여넣기에 넘기는 번들 (복사한 것 그대로) */
+export interface ReviewBundle {
+  bundleId: string;
+  format: 'ai-md' | 'ai-json';
+  basis: { revision: number };
+  scopeLabel: string;
+  scope: AskAiScope;
+  template: AskAiTemplate;
+  question: string;
+  bundleMd: string;
+}
+export interface ReviewListItem {
+  id: string;
+  mode: 'manual' | 'api';
+  source: string;
+  tools: string[];
+  target: { type: 'draft'; revision: number } | { type: 'version'; versionId: string };
+  bundleLinked: boolean;
+  bundleId: string | null;
+  format: 'ai-md' | 'ai-json' | null;
+  scopeLabel: string | null;
+  template: AskAiTemplate | null;
+  question: string | null;
+  status: string;
+  answerCount: number;
+  staleBasis: boolean;
+  createdAt: string;
+  finishedAt: string | null;
+}
+export interface ReviewAnswer { id: string; tool: string; answerMd: string; followUpOf: string | null; followUpQuestion: string | null; createdAt: string }
+export interface ReviewDetail extends ReviewListItem { bundleMd: string | null; answers: ReviewAnswer[] }
+
 /** 422 SENSITIVE_DATA_DETECTED의 details */
 export interface SensitiveScanDetails {
   issues: { rule: string; path: string; sample: string }[];

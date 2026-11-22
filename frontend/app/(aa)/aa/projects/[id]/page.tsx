@@ -76,6 +76,7 @@ function ProjectOverview({ id }: { id: string }) {
         actions={<div style={{ display: 'flex', gap: 8 }}>
           <Button onClick={() => setShowReadme(true)} data-testid="aa-overview-readme">README.md</Button>
           <Button onClick={() => router.push(`${base}/requirements`)}>요구사항</Button>
+          <Button onClick={() => router.push(`${base}/reviews`)} data-testid="aa-overview-reviews">리뷰</Button>
           <Button variant="primary" onClick={() => router.push(`${base}/architecture`)}>Studio 열기 ▸</Button>
         </div>}
       />

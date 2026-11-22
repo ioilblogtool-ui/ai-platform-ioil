@@ -5,7 +5,8 @@
 // AA는 { status, code, details }를 보존하는 전용 래퍼를 쓴다 (409 충돌 처리에 currentRevision 필요).
 import type {
   AaProject, AaProjectDetail, AaProjectSummary, ArchitectureModel, DraftResponse,
-  ListProjectsParams, ListRequirementsParams, ProjectStatus, ReadmeExportRequest, ReadmeExportResult, Requirement, RequirementCreate,
+  AskAiExportRequest, AskAiExportResult, ListProjectsParams, ListRequirementsParams, ProjectStatus, ReadmeExportRequest, ReadmeExportResult,
+  Requirement, RequirementCreate, ReviewBundle, ReviewDetail, ReviewListItem,
   RequirementUpdate, SaveDraftResult, TypeRegistry, ValidationIssue,
 } from './architecture-types';
 
@@ -103,6 +104,25 @@ export function createAaClient(deps: AaClientDeps) {
     // ── 내보내기 (Sprint 4: readme-md) — 422는 AaApiError(details: SensitiveScanDetails) ──
     async exportReadme(projectId: string, body: ReadmeExportRequest) {
       return (await request<{ data: ReadmeExportResult }>(`${p(projectId)}/export`, json('POST', body))).data;
+    },
+
+    // Ask AI 번들 · Mermaid (Sprint 5)
+    async exportAskAi(projectId: string, body: AskAiExportRequest) {
+      return (await request<{ data: AskAiExportResult }>(`${p(projectId)}/export`, json('POST', body))).data;
+    },
+
+    // ── 외부 AI 수동 리뷰 (Sprint 5) ──
+    listReviews(projectId: string, params?: { limit?: number; offset?: number }) {
+      return request<{ data: ReviewListItem[]; total: number }>(`${p(projectId)}/reviews${deps.buildQuery({ ...params })}`);
+    },
+    async getReview(projectId: string, reviewId: string) {
+      return (await request<{ data: ReviewDetail }>(`${p(projectId)}/reviews/${encodeURIComponent(reviewId)}`)).data;
+    },
+    async createManualReview(projectId: string, body: { bundle: ReviewBundle | null; answer: { tool: string; answerMd: string }; clientRequestId: string }) {
+      return (await request<{ data: { id: string; answerId: string; existing: boolean } }>(`${p(projectId)}/reviews/manual`, json('POST', body))).data;
+    },
+    async addReviewAnswer(projectId: string, reviewId: string, body: { tool: string; answerMd: string; followUpOf?: string | null; followUpQuestion?: string | null; clientRequestId: string }) {
+      return (await request<{ data: { id: string; existing: boolean } }>(`${p(projectId)}/reviews/${encodeURIComponent(reviewId)}/answers`, json('POST', body))).data;
     },
 
     // ── 요구사항 ──

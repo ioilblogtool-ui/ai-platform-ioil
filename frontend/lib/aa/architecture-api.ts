@@ -17,7 +17,19 @@ export const {
   updateRequirement,
   deleteRequirement,
   exportReadme,
+  exportAskAi,
+  listReviews,
+  getReview,
+  createManualReview,
+  addReviewAnswer,
   getDraft,
   saveDraft,
   getTypeRegistry,
 } = aaApi;
+
+/** 현재 로그인 사용자 id — 최근 번들 저장 키에만 쓴다 */
+export async function getAaUserId(): Promise<string | null> {
+  const { createClient } = await import('../supabase');
+  const { data: { session } } = await createClient().auth.getSession();
+  return session?.user?.id ?? null;
+}
