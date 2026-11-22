@@ -5,7 +5,7 @@
 import { create } from 'zustand';
 import type { Connection, EdgeChange, NodeChange } from '@xyflow/react';
 import type { ArchitectureModel, Requirement, TypeRegistry } from './architecture-types';
-import { getAaProject, getDraft, getTypeRegistry, listRequirements, saveDraft, AaApiError, RevisionConflictError } from './architecture-api';
+import { getAaProject, getDraft, getTypeRegistry, listRequirements, modelByteSize, saveDraft, AaApiError, RevisionConflictError } from './architecture-api';
 import { newId } from './ids';
 import type { AaFlowNode } from './graph-mapper';
 import * as ops from './model-ops';
@@ -70,7 +70,27 @@ type StudioState = {
   loadRequirements: () => Promise<void>;
   clearSelection: () => void;
   save: () => Promise<void>;
+
+  /** Mermaid 가져오기 적용 중 — 편집·자동 저장을 막는다 */
+  importing: boolean;
+  /** 가져오기 직후 1단계 되돌리기 (Q5). 다음 모델 편집이 생기면 null */
+  importUndo: { model: ArchitectureModel; revision: number; summary: ops.ImportSummary } | null;
+  /** 가져오기 적용 (Step 3 ①~⑦). build는 그 시점의 최신 모델로 병합 결과를 만든다 */
+  applyImport: (build: (latest: ArchitectureModel) => ImportBuild) => Promise<ImportOutcome>;
+  undoImport: () => Promise<ImportOutcome>;
+  dismissImportUndo: () => void;
 };
+
+export type ImportBuild = { model: ArchitectureModel; summary: ops.ImportSummary } | { error: string; ids?: string[] };
+export type ImportOutcome =
+  | { status: 'saved'; revision: number; summary?: ops.ImportSummary }
+  | { status: 'blocked'; reason: 'save_conflict' | 'save_failed' | 'busy' }
+  | { status: 'invalid'; error: string; ids?: string[] }
+  | { status: 'conflict'; revision: number | null }
+  | { status: 'failed'; message: string; code?: string };
+
+export const IMPORT_MAX_BYTES = 1024 * 1024;
+export const IMPORT_MAX_COMPONENTS = 500;
 
 export const useStudio = create<StudioState>((set, get) => {
   const dirtyState = (s: SaveState): SaveState => (s === 'saving' || s === 'conflict' ? s : 'dirty');
@@ -118,7 +138,8 @@ export const useStudio = create<StudioState>((set, get) => {
   const commitEdit = () => {
     const { editSeq, model, saveState, recovery } = get();
     committedModel = model;
-    set({ editSeq: editSeq + 1, saveState: dirtyState(saveState) });
+    // 가져오기 되돌리기는 가져온 직후에만 가능하다 (Q5)
+    set({ editSeq: editSeq + 1, saveState: dirtyState(saveState), importUndo: null });
     backup();
     if (!pausedForAuth && !recovery && saveState !== 'saving' && saveState !== 'conflict') {
       retryUsed = false;
@@ -127,8 +148,8 @@ export const useStudio = create<StudioState>((set, get) => {
   };
 
   async function persist(confirmedRevision?: number) {
-    const { projectId, baseRevision, saveState, editSeq, recovery, reloading } = get();
-    if (!projectId || !committedModel || recovery || reloading || saveState === 'saving' ||
+    const { projectId, baseRevision, saveState, editSeq, recovery, reloading, importing } = get();
+    if (!projectId || !committedModel || recovery || reloading || importing || saveState === 'saving' ||
         saveState === 'loading' || saveState === 'saved' || pausedForAuth ||
         (saveState === 'conflict' && confirmedRevision === undefined)) return;
     const currentSession = session;
@@ -196,8 +217,8 @@ export const useStudio = create<StudioState>((set, get) => {
 
   // 모델을 바꾸는 공통 경로: model-ops가 새 모델을 돌려준다. 같은 객체면 변경 없음 → dirty 아님
   const edit = (fn: (m: ArchitectureModel, viewId: string) => ArchitectureModel) => {
-    const { model, viewId, recovery, reloading } = get();
-    if (!model || recovery || reloading) return false;
+    const { model, viewId, recovery, reloading, importing } = get();
+    if (!model || recovery || reloading || importing) return false;
     const next = fn(model, viewId);
     if (next === model) return false;
     set({ model: next });
@@ -208,8 +229,8 @@ export const useStudio = create<StudioState>((set, get) => {
   // 드래그·크기 조절 중에는 화면에만 반영하고 편집으로 세지 않는다. 끝났을 때 그동안 바뀌었는지로 dirty를 정한다
   let changedDuringGesture = false;
   const preview = (fn: (m: ArchitectureModel, viewId: string) => ArchitectureModel) => {
-    const { model, viewId, recovery, reloading } = get();
-    if (!model || recovery || reloading) return;
+    const { model, viewId, recovery, reloading, importing } = get();
+    if (!model || recovery || reloading || importing) return;
     const next = fn(model, viewId);
     if (next !== model) { changedDuringGesture = true; set({ model: next }); }
   };
@@ -252,6 +273,8 @@ export const useStudio = create<StudioState>((set, get) => {
     registry: null,
     requirements: [],
     requirementsError: null,
+    importing: false,
+    importUndo: null,
     selectedNodeIds: [],
     selectedEdgeIds: [],
     pendingDelete: null,
@@ -279,7 +302,7 @@ export const useStudio = create<StudioState>((set, get) => {
         projectId, saveState: 'loading', loadError: null, model: null,
         selectedNodeIds: [], selectedEdgeIds: [], pendingDelete: null,
         conflictRevision: null, saveMessage: null, backupMessage: null, recovery: null, reloading: false,
-        requirements: [], requirementsError: null,
+        requirements: [], requirementsError: null, importing: false, importUndo: null,
       });
       try {
         await inFlight.get(projectId)?.catch(() => undefined);
@@ -537,7 +560,88 @@ export const useStudio = create<StudioState>((set, get) => {
       retryUsed = false;
       await persist();
     },
+
+    // ── Mermaid 가져오기 (Sprint 4 Step 3, 실행계획 "적용 순서" ①~⑦) ──
+    // ①(Inspector 대기 입력 반영)은 호출하는 화면에서 먼저 한다.
+    async applyImport(build) {
+      const outcome = await saveWholeModel((latest) => build(latest), true);
+      return outcome;
+    },
+
+    async undoImport() {
+      const undo = get().importUndo;
+      if (!undo) return { status: 'invalid', error: 'no_undo' };
+      return saveWholeModel(() => ({ model: undo.model, summary: undo.summary }), false);
+    },
+
+    dismissImportUndo() {
+      set({ importUndo: null });
+    },
   };
+
+  // 가져오기 적용·되돌리기 공통 저장. Draft PUT은 많아야 1회다.
+  async function saveWholeModel(build: (latest: ArchitectureModel) => ImportBuild, isImport: boolean): Promise<ImportOutcome> {
+    const { projectId, importing, recovery, reloading } = get();
+    if (!projectId || importing || recovery || reloading) return { status: 'blocked', reason: 'busy' };
+    const currentSession = session;
+    // ② 자동 저장 예약 중지, 이후 편집·자동 저장 차단
+    autosave.stop();
+    set({ importing: true });
+    try {
+      // ③ 진행 중 저장이 끝날 때까지 기다린다. 그 저장이 충돌·실패로 끝나면 가져오기 PUT 없이 멈춘다
+      await inFlight.get(projectId)?.catch(() => undefined);
+      if (session !== currentSession) return { status: 'blocked', reason: 'busy' };
+      const state = get();
+      if (state.saveState === 'conflict') return { status: 'blocked', reason: 'save_conflict' };
+      if (state.saveState === 'error') return { status: 'blocked', reason: 'save_failed' };
+      if (!state.model || state.saveState === 'loading' || state.saveState === 'saving') return { status: 'blocked', reason: 'busy' };
+
+      // ④ 그 시점의 최신 모델(미저장 편집 포함)로 병합
+      const latest = state.model;
+      const built = build(latest);
+      if ('error' in built) return { status: 'invalid', error: built.error, ids: built.ids };
+      // ⑤ 저장 한도를 먼저 확인 (서버 V1~V12와 revision 검사는 PUT에서)
+      if (modelByteSize(built.model) > IMPORT_MAX_BYTES) return { status: 'invalid', error: 'too_large' };
+      if (Object.keys(built.model.components).length > IMPORT_MAX_COMPONENTS) return { status: 'invalid', error: 'too_many_components' };
+
+      // ⑥ 저장 PUT 1회
+      set({ saveMessage: null });
+      const request = saveDraft(projectId, state.baseRevision, built.model);
+      inFlight.set(projectId, request);
+      try {
+        const res = await request;
+        if (session !== currentSession) return { status: 'blocked', reason: 'busy' };
+        // ⑦ 성공: 모델·revision 반영, 되돌리기 정보 기록 (되돌리기 자체는 다시 되돌릴 수 없다)
+        committedModel = built.model;
+        clearBackup();
+        set({
+          model: built.model, baseRevision: res.revision, saveState: 'saved', conflictRevision: null,
+          saveMessage: res.warnings.length ? `경고 ${res.warnings.length}건` : null,
+          importUndo: isImport ? { model: latest, revision: res.revision, summary: built.summary } : null,
+          selectedNodeIds: [], selectedEdgeIds: [],
+        });
+        return { status: 'saved', revision: res.revision, summary: built.summary };
+      } catch (error) {
+        if (session !== currentSession) return { status: 'blocked', reason: 'busy' };
+        if (error instanceof RevisionConflictError) {
+          // 로컬 모델(미저장 편집 포함)은 그대로 두고 Sprint 3 충돌 절차로 넘긴다. 가져오기 결과는 적용하지 않았다
+          set({ saveState: 'conflict', conflictRevision: error.currentRevision, saveMessage: error.message, importUndo: null });
+          return { status: 'conflict', revision: error.currentRevision };
+        }
+        const apiError = error instanceof AaApiError ? error : null;
+        if (apiError?.status === 401) pausedForAuth = true;
+        return { status: 'failed', message: (error as Error).message, code: apiError?.code };
+      } finally {
+        if (inFlight.get(projectId) === request) inFlight.delete(projectId);
+      }
+    } finally {
+      if (session === currentSession) {
+        set({ importing: false });
+        // 가져오기를 멈췄을 때 남아 있던 미저장 편집은 평소처럼 자동 저장한다
+        if (get().saveState === 'dirty' && !pausedForAuth) autosave.queue();
+      }
+    }
+  }
 });
 
 // 개발 중 브라우저 확인용 (운영 빌드에는 노출하지 않음)

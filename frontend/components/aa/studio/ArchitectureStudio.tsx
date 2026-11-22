@@ -14,6 +14,7 @@ import GroupNode from './GroupNode';
 import NoteNode from './NoteNode';
 import RelationEdge from './RelationEdge';
 import PropertyInspector from './PropertyInspector';
+import ImportMermaidModal from './ImportMermaidModal';
 import type { InspectorEdits } from './SchemaForm';
 import { CATEGORY_COLOR, DND_MIME, paletteItems, type PaletteItem } from './palette-meta';
 
@@ -78,6 +79,8 @@ function Studio({ projectId }: { projectId: string }) {
   const [query, setQuery] = useState('');
   const [paletteOpen, setPaletteOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
 
   const edits = useMemo(() => createInspectorEdits(), [projectId]);
   useEffect(() => {
@@ -193,6 +196,10 @@ function Studio({ projectId }: { projectId: string }) {
         </button>
         <button onClick={() => router.push(`/aa/projects/${projectId}/requirements`)} style={btn()}>
           요구사항
+        </button>
+        <button onClick={() => { edits.flush(); setImportNotice(null); setImportOpen(true); }} style={btn()} data-testid="aa-import-open"
+          disabled={!s.model || Boolean(s.recovery) || s.saveState === 'loading'} title="Mermaid flowchart를 붙여 넣어 노드·관계 만들기">
+          가져오기
         </button>
         <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }} data-testid="aa-revision">Draft · rev {s.baseRevision || '–'}</span>
         <div style={{ flex: 1 }} />
@@ -313,6 +320,25 @@ function Studio({ projectId }: { projectId: string }) {
       </div>
 
       {s.pendingDelete && <DeleteDialog />}
+      {importOpen && (
+        <ImportMermaidModal
+          onClose={() => setImportOpen(false)}
+          flushEdits={() => edits.flush()}
+          onApplied={() => { setImportNotice(null); setTimeout(() => fitView({ maxZoom: 1, duration: 200 }), 50); }}
+        />
+      )}
+      {(s.importUndo || importNotice) && (
+        <div role="status" data-testid="aa-import-toast" style={{ position: 'fixed', left: '50%', bottom: 24, transform: 'translateX(-50%)', zIndex: 30, padding: '10px 14px', borderRadius: 10, background: '#16161a', border: '1px solid rgba(200,169,110,0.4)', color: 'rgba(255,255,255,0.9)', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+          {s.importUndo
+            ? <>가져오기 완료 · 새 컴포넌트 {s.importUndo.summary.newComponents} · 기존 연결 {s.importUndo.summary.reused} · 새 관계 {s.importUndo.summary.newRelations}
+                <button style={btn()} data-testid="aa-import-undo" onClick={async () => {
+                  const r = await s.undoImport();
+                  setImportNotice(r.status === 'saved' ? '가져오기 전으로 되돌렸습니다.' : r.status === 'conflict' ? '다른 곳에서 먼저 저장되어 되돌리지 못했습니다. 위의 충돌 안내를 확인하세요.' : '되돌리지 못했습니다.');
+                }}>가져오기 전으로 되돌리기</button>
+                <button style={btn(true)} onClick={s.dismissImportUndo}>닫기</button></>
+            : <>{importNotice}<button style={btn(true)} onClick={() => setImportNotice(null)}>닫기</button></>}
+        </div>
+      )}
     </div>
   );
 }

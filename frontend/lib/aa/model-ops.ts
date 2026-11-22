@@ -506,3 +506,125 @@ export function resizeGroup(model: ArchitectureModel, viewId: string, nodeId: st
     if (position) n.position = round(position);
   });
 }
+
+// ── Mermaid 가져오기 병합 (Sprint 4 Step 3 · IMP-05·06 · Q7·Q8) ────────────────
+// 파싱(importers/mermaid-flowchart)과 배치(import-layout, Dagre)는 호출하는 쪽에서 끝내고 결과만 넘긴다.
+// 이 함수는 순수하다: 입력 모델을 바꾸지 않고, 기존 노드 좌표도 바꾸지 않는다.
+type ImportPreview = import('./importers/mermaid-flowchart').ImportResult;
+type ImportLayout = import('./import-layout').LayoutResult;
+
+/** reuse: 재사용할 기존 componentId, null = 새로 만들기, undefined = 아직 고르지 않음(후보가 여러 개) */
+export type ImportChoice = { type: string; reuse: string | null | undefined };
+export type ImportSummary = { newComponents: number; reused: number; newNodes: number; newRelations: number; skippedRelations: number; newGroups: number };
+
+const nameKey = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/** 이름이 정확히 같은(대소문자·공백 무시) 기존 컴포넌트 후보 */
+export function importCandidates(model: ArchitectureModel, preview: ImportPreview): Record<string, string[]> {
+  const byName = new Map<string, string[]>();
+  for (const c of Object.values(model.components)) {
+    const key = nameKey(c.name);
+    byName.set(key, [...(byName.get(key) ?? []), c.id]);
+  }
+  return Object.fromEntries(preview.nodes.map((n) => [n.mermaidId, byName.get(nameKey(n.label)) ?? []]));
+}
+
+/** Q7 기본값: 후보 1개면 재사용, 여러 개면 미선택, 없으면 새로 만들기. 타입은 추론값 */
+export function defaultImportChoices(preview: ImportPreview, candidates: Record<string, string[]>): Record<string, ImportChoice> {
+  return Object.fromEntries(preview.nodes.map((n) => {
+    const list = candidates[n.mermaidId] ?? [];
+    return [n.mermaidId, { type: n.inferredType, reuse: list.length === 1 ? list[0] : list.length ? undefined : null }];
+  }));
+}
+
+/** 적용 전에 막아야 하는 선택 문제. 미선택(후보 여러 개), 사라진 재사용 대상 */
+export function importChoiceProblems(model: ArchitectureModel, preview: ImportPreview, choices: Record<string, ImportChoice>) {
+  const unchosen: string[] = [], missing: string[] = [];
+  for (const n of preview.nodes) {
+    const choice = choices[n.mermaidId];
+    if (!choice || choice.reuse === undefined) unchosen.push(n.mermaidId);
+    else if (choice.reuse && !model.components[choice.reuse]) missing.push(n.mermaidId);
+  }
+  return { unchosen, missing };
+}
+
+/** 새 노드가 필요한 Mermaid 노드: 새 컴포넌트, 또는 이 View에 노드가 없는 기존 컴포넌트 */
+export function importNodesToPlace(model: ArchitectureModel, viewId: string, preview: ImportPreview, choices: Record<string, ImportChoice>): string[] {
+  const view = getView(model, viewId);
+  const drawn = new Set(view?.nodes.filter((n) => n.kind === 'component').map((n) => n.componentId));
+  return preview.nodes
+    .filter((n) => { const reuse = choices[n.mermaidId]?.reuse; return !reuse || !drawn.has(reuse); })
+    .map((n) => n.mermaidId);
+}
+
+const relationKey = (r: { from: string; to: string; type: string; protocol?: string; mode?: string; label?: string }) =>
+  [r.from, r.to, r.type, r.protocol ?? '', r.mode ?? 'sync', r.label ?? ''].join('|');
+
+export function mergeImport(
+  model: ArchitectureModel, viewId: string, preview: ImportPreview, choices: Record<string, ImportChoice>,
+  layout: ImportLayout, registry: TypeRegistry | null, newId: NewId,
+): { model: ArchitectureModel; summary: ImportSummary } | { error: 'unchosen' | 'missing' | 'no_view' | 'layout'; ids: string[] } {
+  if (!getView(model, viewId)) return { error: 'no_view', ids: [] };
+  const { unchosen, missing } = importChoiceProblems(model, preview, choices);
+  if (unchosen.length) return { error: 'unchosen', ids: unchosen };
+  if (missing.length) return { error: 'missing', ids: missing };
+  const toPlace = importNodesToPlace(model, viewId, preview, choices);
+  const unplaced = toPlace.filter((id) => !layout.nodes[id]);
+  if (unplaced.length) return { error: 'layout', ids: unplaced };
+
+  const next = cloneModel(model);
+  const view = getView(next, viewId)!;
+  const summary: ImportSummary = { newComponents: 0, reused: 0, newNodes: 0, newRelations: 0, skippedRelations: 0, newGroups: 0 };
+  const componentOf = new Map<string, string>();
+
+  // 그룹: 새 노드를 하나라도 담는 subgraph만 만든다 (재사용한 기존 노드는 옮기지 않는다)
+  const groupNodeId = new Map<string, string>();
+  for (const g of preview.groups) {
+    const box = layout.groups[g.id];
+    if (!box || !g.members.some((m) => toPlace.includes(m) && layout.nodes[m]?.parentGroup === g.id)) continue;
+    const id = newId('nd');
+    view.nodes.push({ id, kind: 'group', label: g.label.slice(0, 120) || 'Boundary', position: round(box), width: Math.max(GROUP_MIN_SIZE, Math.round(box.width)), height: Math.max(GROUP_MIN_SIZE, Math.round(box.height)) });
+    groupNodeId.set(g.id, id);
+    summary.newGroups++;
+  }
+
+  for (const n of preview.nodes) {
+    const choice = choices[n.mermaidId];
+    let componentId = choice.reuse ?? null;
+    if (componentId) {
+      summary.reused++;
+    } else {
+      const def = registry?.types[choice.type];
+      const type = def && def.nodeKind === 'component' ? choice.type : 'service';
+      componentId = newId('cmp');
+      next.components[componentId] = {
+        id: componentId, type, layer: registry?.types[type]?.layer ?? 'logical', name: n.label.slice(0, 120) || n.mermaidId,
+        properties: defaultProperties(registry, type), requirementIds: [], decisionIds: [],
+      };
+      summary.newComponents++;
+    }
+    componentOf.set(n.mermaidId, componentId);
+    if (toPlace.includes(n.mermaidId)) {
+      const pos = layout.nodes[n.mermaidId];
+      const parentId = pos.parentGroup ? groupNodeId.get(pos.parentGroup) : undefined;
+      view.nodes.push({ id: newId('nd'), kind: 'component', componentId, position: round(pos), ...(parentId ? { parentId } : {}) });
+      summary.newNodes++;
+    }
+  }
+
+  const seen = new Set(Object.values(next.relations).map(relationKey));
+  for (const e of preview.edges) {
+    const from = componentOf.get(e.from), to = componentOf.get(e.to);
+    if (!from || !to || from === to) { summary.skippedRelations++; continue; }
+    const rel: Relation = { id: newId('rel'), type: 'calls', from, to, mode: e.mode, requirementIds: [] };
+    if (e.protocol) rel.protocol = e.protocol as Relation['protocol'];
+    if (e.label) rel.label = e.label.slice(0, 500);
+    const key = relationKey(rel);
+    if (seen.has(key)) { summary.skippedRelations++; continue; }
+    seen.add(key);
+    next.relations[rel.id] = rel;
+    view.edges.push({ id: newId('ed'), relationId: rel.id });
+    summary.newRelations++;
+  }
+  return { model: next, summary };
+}

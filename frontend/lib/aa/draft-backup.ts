@@ -8,7 +8,7 @@ export type DraftBackup = {
 };
 
 // Mirrors the Phase 1 V12 block rules. Scan keys as well as values.
-const secretPatterns = [
+export const secretPatterns = [
   /AKIA[0-9A-Z]{16}/,
   /\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|xox[bp]-[A-Za-z0-9-]{10,}|sb_secret_[A-Za-z0-9_-]{10,})/,
   /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,

@@ -10,7 +10,8 @@ import MarkdownPreview from '@/components/MarkdownPreview';
 import PageHeader from '@/components/PageHeader';
 import { AaApiError, getAaProject, getDraft, listRequirements, updateAaProject } from '@/lib/aa/architecture-api';
 import type { AaProjectDetail, DraftResponse, Requirement } from '@/lib/aa/architecture-types';
-import { miniCanvasLayout, unmappedNfrCount, type MiniCanvas } from '@/lib/aa/overview';
+import { miniCanvasLayout, unmappedNfrCount } from '@/lib/aa/overview';
+import MiniCanvas from '@/components/aa/MiniCanvas';
 
 const README_MAX_BYTES = 64 * 1024;
 const muted: CSSProperties = { color: '#9a98a8', fontSize: 13 };
@@ -164,47 +165,7 @@ function DraftPreview({ draft, onOpen }: { draft: Loaded<DraftResponse>; onOpen:
       <Button size="sm" onClick={onOpen}>Studio에서 그리기 ▸</Button>
     </div>;
   }
-  return <MiniCanvasSvg layout={layout} />;
-}
-
-function MiniCanvasSvg({ layout }: { layout: MiniCanvas }) {
-  const { x, y, w, h } = layout.viewBox;
-  return (
-    <svg role="img" aria-label="Logical View 미리보기" data-testid="aa-mini-canvas" viewBox={`${x} ${y} ${w} ${h}`}
-      style={{ width: '100%', height: 300, background: '#0b0b0d', borderRadius: 8, border: '1px solid #ffffff10' }}
-      preserveAspectRatio="xMidYMid meet">
-      <defs>
-        <marker id="aa-mini-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8678" />
-        </marker>
-      </defs>
-      {layout.boxes.filter((b) => b.kind === 'group').map((b) => (
-        <g key={b.id}>
-          <rect x={b.x} y={b.y} width={b.w} height={b.h} rx={10} fill="rgba(200,169,110,0.04)" stroke="rgba(200,169,110,0.35)" strokeDasharray="6 4" />
-          <text x={b.x + 10} y={b.y + 18} fontSize={12} fill="#c8a96e">{b.label}</text>
-        </g>
-      ))}
-      {layout.lines.map((l) => (
-        <g key={l.id}>
-          <line x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#8a8678" strokeWidth={1.5} markerEnd="url(#aa-mini-arrow)" />
-          {l.label && <text x={(l.x1 + l.x2) / 2} y={(l.y1 + l.y2) / 2 - 6} fontSize={10} textAnchor="middle" fill="#9a98a8">{l.label}</text>}
-        </g>
-      ))}
-      {layout.boxes.filter((b) => b.kind !== 'group').map((b) => (
-        <g key={b.id}>
-          <rect x={b.x} y={b.y} width={b.w} height={b.h} rx={8}
-            fill={b.kind === 'note' ? 'rgba(245,165,36,0.08)' : '#121215'}
-            stroke={b.kind === 'note' ? 'rgba(245,165,36,0.4)' : 'rgba(255,255,255,0.18)'} />
-          <text x={b.x + 12} y={b.y + 24} fontSize={13} fontWeight={600} fill="#e2e0db">{clip(b.label, 20)}</text>
-          {b.sub && <text x={b.x + 12} y={b.y + 42} fontSize={11} fill="#9a98a8">{clip(b.sub, 24)}</text>}
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-function clip(value: string, max: number) {
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+  return <MiniCanvas layout={layout} />;
 }
 
 function Status({ project, draft, requirements }: { project: AaProjectDetail | null; draft: DraftResponse | null; requirements: Requirement[] | null }) {
