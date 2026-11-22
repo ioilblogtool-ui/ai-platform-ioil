@@ -11,6 +11,10 @@ const { scanForSecrets } = require('../../lib/aa/sensitive-scan');
 const { emptyModel, README_TEMPLATE } = require('../../lib/aa/empty-model');
 
 const { reconcile } = require('../../lib/aa/requirement-refs');
+const sampleReports = require('../../lib/aa/templates/sample-reports');
+
+// 새 프로젝트 템플릿 (empty는 기본). 샘플 모델은 SQL 변경 없이 aa_create_project의 p_model로 넘긴다
+const TEMPLATES = { [sampleReports.key]: sampleReports };
 
 const router = express.Router();
 router.use(requireAuth);
@@ -107,14 +111,17 @@ router.post('/', wrap(async (req, res) => {
   const { name, description, readmeMd, template = 'empty' } = req.body || {};
   const problem = checkName(name) || checkDescription(description) || checkReadme(readmeMd);
   if (problem) return sendError(res, 400, 'VALIDATION_FAILED', problem.message, [problem]);
-  if (template !== 'empty') return sendError(res, 400, 'VALIDATION_FAILED', '지원하지 않는 템플릿입니다. (Sprint 1: empty만 지원)');
+  const sample = typeof template === 'string' && Object.hasOwn(TEMPLATES, template) ? TEMPLATES[template] : null;
+  if (template !== 'empty' && !sample) {
+    return sendError(res, 400, 'VALIDATION_FAILED', `지원하지 않는 템플릿입니다. (${['empty', ...Object.keys(TEMPLATES)].join(', ')})`);
+  }
 
   const { data, error } = await supabase.rpc('aa_create_project', {
     p_user: req.user.id,
     p_name: name.trim(),
     p_description: description ?? null,
-    p_readme_md: readmeMd ?? README_TEMPLATE,
-    p_model: emptyModel(),
+    p_readme_md: readmeMd ?? (sample ? sample.readmeMd : README_TEMPLATE),
+    p_model: sample ? sample.model() : emptyModel(),
   });
   if (error) throw error;
   res.status(201).json({ data: toProject(data, { draftRevision: 1 }) });

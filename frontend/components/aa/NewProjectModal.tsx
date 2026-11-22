@@ -8,6 +8,7 @@ import { createAaProject, AaApiError } from '@/lib/aa/architecture-api';
 export default function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [template, setTemplate] = useState<'empty' | 'sample-reports'>('empty');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,7 +20,7 @@ export default function NewProjectModal({ onClose, onCreated }: { onClose: () =>
     setBusy(true);
     setError(null);
     try {
-      const p = await createAaProject({ name: trimmed, description: description.trim() || undefined });
+      const p = await createAaProject({ name: trimmed, description: description.trim() || undefined, template });
       onCreated(p.id);
     } catch (e) {
       setError(e instanceof AaApiError ? e.message : '프로젝트를 만들지 못했습니다.');
@@ -39,6 +40,26 @@ export default function NewProjectModal({ onClose, onCreated }: { onClose: () =>
       }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.07)', fontWeight: 650, fontSize: 15 }}>새 아키텍처 프로젝트</div>
         <div style={{ padding: '16px 20px' }}>
+          <div role="radiogroup" aria-label="시작 방식" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+            {([
+              ['empty', '빈 프로젝트', '직접 그리거나 Mermaid로 가져오기'],
+              ['sample-reports', '샘플: AI Platform Reports', '웹 앱 · API · DB · 인증 4개 컴포넌트'],
+            ] as const).map(([key, title, sub]) => (
+              <button key={key} type="button" role="radio" aria-checked={template === key} data-testid={`aa-template-${key}`}
+                onClick={() => {
+                  setTemplate(key);
+                  if (key === 'sample-reports' && !name.trim()) setName('AI Platform Reports (샘플)');
+                }}
+                style={{
+                  textAlign: 'left', padding: '10px 12px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
+                  background: template === key ? 'rgba(200,169,110,0.1)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${template === key ? 'rgba(200,169,110,0.6)' : 'rgba(255,255,255,0.1)'}`, color: 'rgba(255,255,255,0.9)',
+                }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{title}</div>
+                <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.5)', marginTop: 3 }}>{sub}</div>
+              </button>
+            ))}
+          </div>
           <label style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.55)', marginBottom: 6 }}>이름 *</label>
           <input autoFocus value={name} maxLength={120} onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onClose(); }}

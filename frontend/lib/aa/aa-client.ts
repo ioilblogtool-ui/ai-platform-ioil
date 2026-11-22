@@ -87,7 +87,7 @@ export function createAaClient(deps: AaClientDeps) {
     listProjects(params?: ListProjectsParams) {
       return request<{ data: AaProjectSummary[]; total: number }>(`/api/aa/projects${deps.buildQuery(params as Record<string, unknown>)}`);
     },
-    async createProject(input: { name: string; description?: string; readmeMd?: string }) {
+    async createProject(input: { name: string; description?: string; readmeMd?: string; template?: 'empty' | 'sample-reports' }) {
       return (await request<{ data: AaProject & { draftRevision: number } }>('/api/aa/projects', json('POST', input))).data;
     },
     async getProject(projectId: string) {
