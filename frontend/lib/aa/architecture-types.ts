@@ -104,9 +104,38 @@ export interface AaProjectDetail extends AaProject {
 export interface DraftResponse {
   model: ArchitectureModel;
   revision: number;
-  baseVersion: null | { id: string; label: string };
+  baseVersion: null | VersionRef;
   updatedAt: string;
 }
+
+// ── 버전 (Sprint 6) ──
+export interface VersionRef { id: string; label: string; versionNo: number }
+/** 발행 때 저장한 변경 요약 (03 §4). 첫 버전은 first: true */
+export type DiffSummary =
+  | { hashVersion: number; first: true; components: number; relations: number }
+  | {
+      hashVersion: number; first?: false;
+      componentsAdded: number; componentsRemoved: number; componentsModified: number; requirementLinksChanged: number;
+      relationsAdded: number; relationsRemoved: number; relationsModified: number;
+      nodesReparented: number; viewChanges: number; layoutOnly: number; requirementsChanged: number;
+    };
+export interface VersionListItem { id: string; versionNo: number; label: string; note: string | null; diffSummary: DiffSummary | null; sourceRevision: number; createdAt: string }
+export interface VersionRequirement {
+  id: string; code: string; kind: string; category: string | null; title: string; target: string | null; metric: string | null; priority: string;
+  current?: { title: string; target: string | null; metric: string | null; priority: string };
+  deleted?: true;
+}
+export interface VersionDetail extends VersionListItem { model: ArchitectureModel; readmeMd: string; requirements: VersionRequirement[] }
+export interface PublishPreview {
+  revision: number;
+  latestVersion: VersionRef | null;
+  suggestedLabel: string;
+  summary: DiffSummary;
+  noChanges: boolean;
+  layoutOnly: number;
+  snapshotHash: string;
+}
+export interface PublishRequest { label?: string; note?: string; baseRevision: number; expectedLatestVersionId: string | null; snapshotHash: string }
 
 export interface ValidationIssue {
   rule: string;

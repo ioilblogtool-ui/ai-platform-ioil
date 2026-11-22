@@ -4,7 +4,7 @@
 // 모델 변경은 model-ops를 사용한다. 자동 저장과 수동 저장은 같은 revision 경로를 거친다.
 import { create } from 'zustand';
 import type { Connection, EdgeChange, NodeChange } from '@xyflow/react';
-import type { ArchitectureModel, Requirement, TypeRegistry } from './architecture-types';
+import type { VersionRef, ArchitectureModel, Requirement, TypeRegistry } from './architecture-types';
 import { getAaProject, getDraft, getTypeRegistry, listRequirements, modelByteSize, saveDraft, AaApiError, RevisionConflictError } from './architecture-api';
 import { newId } from './ids';
 import type { AaFlowNode } from './graph-mapper';
@@ -25,6 +25,9 @@ type StudioState = {
   model: ArchitectureModel | null;
   viewId: string;
   baseRevision: number;
+  /** Draft가 마지막으로 발행·복원한 버전 (Sprint 6) */
+  baseVersion: VersionRef | null;
+  setBaseVersion: (v: VersionRef | null) => void;
   saveState: SaveState;
   saveMessage: string | null;
   conflictRevision: number | null;
@@ -266,6 +269,8 @@ export const useStudio = create<StudioState>((set, get) => {
     model: null,
     viewId: 'view_logical',
     baseRevision: 0,
+    baseVersion: null,
+    setBaseVersion(v) { set({ baseVersion: v }); },
     saveState: 'loading',
     saveMessage: null,
     conflictRevision: null,
@@ -325,7 +330,7 @@ export const useStudio = create<StudioState>((set, get) => {
         }
         committedModel = draft.model;
         set({
-          projectName: project.name, model: draft.model, baseRevision: draft.revision,
+          projectName: project.name, model: draft.model, baseRevision: draft.revision, baseVersion: draft.baseVersion,
           registry, saveState: 'saved', editSeq: 0, recovery, backupMessage,
         });
         void get().loadRequirements();
@@ -371,7 +376,7 @@ export const useStudio = create<StudioState>((set, get) => {
         changedDuringGesture = false;
         pausedForAuth = false;
         set({
-          model: draft.model, baseRevision: draft.revision, saveState: 'saved',
+          model: draft.model, baseRevision: draft.revision, baseVersion: draft.baseVersion, saveState: 'saved',
           conflictRevision: null, reloading: false, selectedNodeIds: [], selectedEdgeIds: [],
           pendingDelete: null, editSeq: 0,
         });

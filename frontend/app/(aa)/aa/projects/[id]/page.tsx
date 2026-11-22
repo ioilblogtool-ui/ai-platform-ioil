@@ -77,6 +77,7 @@ function ProjectOverview({ id }: { id: string }) {
           <Button onClick={() => setShowReadme(true)} data-testid="aa-overview-readme">README.md</Button>
           <Button onClick={() => router.push(`${base}/requirements`)}>요구사항</Button>
           <Button onClick={() => router.push(`${base}/reviews`)} data-testid="aa-overview-reviews">리뷰</Button>
+          <Button onClick={() => router.push(`${base}/versions`)} data-testid="aa-overview-versions">버전</Button>
           <Button variant="primary" onClick={() => router.push(`${base}/architecture`)}>Studio 열기 ▸</Button>
         </div>}
       />
@@ -182,7 +183,8 @@ function Status({ project, draft, requirements }: { project: AaProjectDetail | n
     ['컴포넌트', draft ? String(Object.keys(draft.model.components).length) : '…'],
     ['관계', draft ? String(Object.keys(draft.model.relations).length) : '…'],
     ['Logical 노드', view ? String(view.nodes.length) : '…'],
-    ['Draft', draft ? `rev ${draft.revision}` : '…'],
+    ['Draft', draft ? `rev ${draft.revision}${draft.baseVersion ? ` · base ${draft.baseVersion.label}` : ''}` : '…'],
+    ['버전', project ? String(project.counts.versions) : '…'],
   ];
   return (
     <dl data-testid="aa-overview-status" style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '8px 12px', fontSize: 13 }}>

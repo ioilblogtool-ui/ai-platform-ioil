@@ -4,7 +4,8 @@
 // 기존 lib/api.ts의 apiFetch는 오류를 `error` 문자열로만 던지므로,
 // AA는 { status, code, details }를 보존하는 전용 래퍼를 쓴다 (409 충돌 처리에 currentRevision 필요).
 import type {
-  AaProject, AaProjectDetail, AaProjectSummary, ArchitectureModel, DraftResponse,
+  AaProject, AaProjectDetail, AaProjectSummary, ArchitectureModel, DiffSummary, DraftResponse,
+  PublishPreview, PublishRequest, VersionDetail, VersionListItem,
   AskAiExportRequest, AskAiExportResult, ListProjectsParams, ListRequirementsParams, ProjectStatus, ReadmeExportRequest, ReadmeExportResult,
   Requirement, RequirementCreate, ReviewBundle, ReviewDetail, ReviewListItem,
   RequirementUpdate, SaveDraftResult, TypeRegistry, ValidationIssue,
@@ -152,6 +153,27 @@ export function createAaClient(deps: AaClientDeps) {
       const res = await request<{ data: { revision: number; updatedAt: string }; warnings: ValidationIssue[] }>(
         `${p(projectId)}/architecture/draft`, json('PUT', { baseRevision, model }),
       );
+      return { ...res.data, warnings: res.warnings ?? [] };
+    },
+
+    // ── 버전 (Sprint 6) ──
+    listVersions(projectId: string, params?: { limit?: number; offset?: number }) {
+      return request<{ data: VersionListItem[]; total: number }>(`${p(projectId)}/architecture/versions${deps.buildQuery({ ...params })}`);
+    },
+    async getPublishPreview(projectId: string) {
+      return (await request<{ data: PublishPreview }>(`${p(projectId)}/architecture/versions/preview`)).data;
+    },
+    async getVersion(projectId: string, versionId: string) {
+      return (await request<{ data: VersionDetail }>(`${p(projectId)}/architecture/versions/${encodeURIComponent(versionId)}`)).data;
+    },
+    /** 409: REVISION_CONFLICT(RevisionConflictError)·VERSION_CHANGED·PREVIEW_STALE·NO_CHANGES·LABEL_TAKEN */
+    async publishVersion(projectId: string, body: PublishRequest) {
+      return (await request<{ data: { id: string; versionNo: number; label: string; diffSummary: DiffSummary; createdAt: string } }>(
+        `${p(projectId)}/architecture/versions`, json('POST', body))).data;
+    },
+    async restoreVersion(projectId: string, versionId: string, baseRevision: number) {
+      const res = await request<{ data: { revision: number; updatedAt: string }; warnings: ValidationIssue[] }>(
+        `${p(projectId)}/architecture/versions/${encodeURIComponent(versionId)}/restore`, json('POST', { baseRevision }));
       return { ...res.data, warnings: res.warnings ?? [] };
     },
 

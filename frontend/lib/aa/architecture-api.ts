@@ -23,6 +23,11 @@ export const {
   createManualReview,
   addReviewAnswer,
   getDraft,
+  listVersions,
+  getPublishPreview,
+  getVersion,
+  publishVersion,
+  restoreVersion,
   saveDraft,
   getTypeRegistry,
 } = aaApi;

@@ -17,6 +17,7 @@ import PropertyInspector from './PropertyInspector';
 import ImportMermaidModal from './ImportMermaidModal';
 import AskAiModal from '../AskAiModal';
 import PasteAnswerModal from '../PasteAnswerModal';
+import PublishModal from '../PublishModal';
 import type { ArchitectureModel } from '@/lib/aa/architecture-types';
 
 /** 현재 View에서 선택한 노드 중 컴포넌트 노드의 componentId (Ask AI 범위) */
@@ -92,7 +93,7 @@ function Studio({ projectId }: { projectId: string }) {
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
   const [importNotice, setImportNotice] = useState<string | null>(null);   // 하단 토스트 (가져오기·리뷰 저장 안내)
-  const [modal, setModal] = useState<null | 'askai' | 'paste'>(null);
+  const [modal, setModal] = useState<null | 'askai' | 'paste' | 'publish'>(null);
 
   const edits = useMemo(() => createInspectorEdits(), [projectId]);
   useEffect(() => {
@@ -104,6 +105,14 @@ function Studio({ projectId }: { projectId: string }) {
     };
   }, [projectId, edits]);
   useEffect(() => { edits.flush(); }, [s.selectedNodeIds, s.selectedEdgeIds, edits]);
+
+  const openPublish = useCallback(async () => {
+    edits.flush();
+    if (useStudio.getState().saveState === 'dirty' || useStudio.getState().saveState === 'error') await useStudio.getState().save();
+    const st = useStudio.getState();
+    if (st.saveState === 'saved' && !st.recovery) { setImportNotice(null); setModal('publish'); }
+    else setImportNotice('저장이 끝나지 않아 발행 창을 열지 않았습니다. 저장 상태를 확인하세요.');
+  }, [edits]);
 
   const saveWithInspector = useCallback(() => {
     edits.flush();
@@ -223,13 +232,21 @@ function Studio({ projectId }: { projectId: string }) {
         <button onClick={() => router.push(`/aa/projects/${projectId}/reviews`)} style={btn()} data-testid="aa-reviews-open">
           리뷰
         </button>
-        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }} data-testid="aa-revision">Draft · rev {s.baseRevision || '–'}</span>
+        <button onClick={() => router.push(`/aa/projects/${projectId}/versions`)} style={btn()} data-testid="aa-versions-open">
+          버전
+        </button>
+        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }} data-testid="aa-revision">Draft · rev {s.baseRevision || '–'}{s.baseVersion ? ` · base ${s.baseVersion.label}` : ''}</span>
         <div style={{ flex: 1 }} />
         {bytes > MODEL_WARN_BYTES && <span style={{ fontSize: 12, color: '#f5a524' }}>설계 크기 {Math.round(bytes / 1024)}KB (한도 1MB)</span>}
         <span data-testid="aa-save-state" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: label.color }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: label.color }} />{label.text}
         </span>
         {s.saveMessage && s.saveState !== 'conflict' && <span data-testid="aa-save-message" role={s.saveState === 'error' ? 'alert' : undefined} style={{ fontSize: 12, color: s.saveState === 'error' ? '#e5484d' : 'rgba(255,255,255,0.45)' }}>{s.saveMessage}</span>}
+        <button onClick={() => void openPublish()} data-testid="aa-publish-open"
+          disabled={!s.model || Boolean(s.recovery) || s.saveState === 'loading' || s.saveState === 'saving' || s.saveState === 'conflict'}
+          title="저장된 Draft를 버전으로 발행 (저장 안 된 변경은 먼저 저장)" style={btn()}>
+          Publish
+        </button>
         <button onClick={saveWithInspector} disabled={Boolean(s.recovery) || s.saveState === 'saving' || s.saveState === 'loading' || s.saveState === 'conflict'}
           title="저장 (Ctrl+S)" style={{ ...btn(), background: '#c8a96e', color: '#16130c', fontWeight: 600, borderColor: '#c8a96e', opacity: s.saveState === 'dirty' || s.saveState === 'error' ? 1 : 0.55 }}>
           {s.saveState === 'error' ? '저장 재시도' : '저장'}
@@ -354,6 +371,10 @@ function Studio({ projectId }: { projectId: string }) {
           selectedComponentIds={selectedComponentIds(s.model, s.viewId, s.selectedNodeIds)}
           unsaved={s.saveState === 'dirty' || s.saveState === 'error' || s.saveState === 'saving'}
           onClose={() => setModal(null)} />
+      )}
+      {modal === 'publish' && (
+        <PublishModal projectId={projectId} onClose={() => setModal(null)}
+          onPublished={(v) => { s.setBaseVersion(v); setModal(null); setImportNotice(`${v.label}을(를) 발행했습니다. [버전]에서 볼 수 있습니다.`); }} />
       )}
       {modal === 'paste' && (
         <PasteAnswerModal projectId={projectId} onClose={() => setModal(null)}
