@@ -23,6 +23,7 @@ router.param('projectId', loadProject);
 router.use('/:projectId/requirements', require('./requirements'));
 router.use('/:projectId/export', require('./export'));
 router.use('/:projectId/reviews', require('./reviews'));
+router.use('/:projectId/architecture/versions', require('./versions'));
 
 const README_MAX_BYTES = 64 * 1024;
 const DESCRIPTION_MAX = 2000;
@@ -97,9 +98,22 @@ router.get('/', wrap(async (req, res) => {
     rows.forEach((r) => drafts.set(r.project_id, r));
   }
 
+  // 프로젝트별 최신 버전 (Sprint 6) — model은 읽지 않는다
+  const latest = new Map();
+  if (ids.length) {
+    const { data: rows, error: vErr } = await supabase
+      .from('aa_architecture_versions')
+      .select('project_id, id, label, version_no, created_at')
+      .eq('user_id', req.user.id)
+      .in('project_id', ids)
+      .order('version_no', { ascending: false });
+    if (vErr) throw vErr;
+    for (const r of rows) if (!latest.has(r.project_id)) latest.set(r.project_id, { id: r.id, label: r.label, createdAt: r.created_at });
+  }
+
   res.json({
     data: data.map((p) => toProject(p, {
-      latestVersion: null,                          // Phase 2 (버전)
+      latestVersion: latest.get(p.id) ?? null,
       draftRevision: drafts.get(p.id)?.revision ?? null,
       draftUpdatedAt: drafts.get(p.id)?.updated_at ?? null,
       openFindings: { high: 0, medium: 0, low: 0 }, // Phase 3
@@ -152,15 +166,19 @@ router.get('/:projectId', wrap(async (req, res) => {
     .select('id', { count: 'exact', head: true })
     .eq('project_id', req.project.id)
     .eq('kind', kind);
-  const [fr, nfr] = await Promise.all([countReq('fr'), countReq('nfr')]);
+  const versionCount = supabase.from('aa_architecture_versions')
+    .select('id', { count: 'exact', head: true })
+    .eq('project_id', req.project.id).eq('user_id', req.user.id);
+  const [fr, nfr, versions] = await Promise.all([countReq('fr'), countReq('nfr'), versionCount]);
   if (fr.error) throw fr.error;
   if (nfr.error) throw nfr.error;
+  if (versions.error) throw versions.error;
 
   res.json({
     data: toProject(req.project, {
       counts: {
         fr: fr.count ?? 0, nfr: nfr.count ?? 0,
-        versions: 0, openFindings: 0, validations: { total: 0, passed: 0 }, decisions: 0, // Phase 2~3
+        versions: versions.count ?? 0, openFindings: 0, validations: { total: 0, passed: 0 }, decisions: 0, // Phase 2~3
       },
     }),
   });
@@ -226,7 +244,14 @@ router.get('/:projectId/architecture', wrap(async (req, res) => {
   if (error) throw error;
   if (!data) return sendError(res, 404, 'NOT_FOUND', 'Draft를 찾을 수 없습니다.');
   const { model, warnings } = await reconcile(supabase, req.project.id, req.user.id, data.model);
-  res.json({ data: { model, revision: data.revision, baseVersion: null, updatedAt: data.updated_at }, ...(warnings.length ? { warnings } : {}) });
+  let baseVersion = null;
+  if (data.base_version_id) {
+    const { data: v, error: vErr } = await supabase.from('aa_architecture_versions').select('id, label, version_no')
+      .eq('project_id', req.project.id).eq('id', data.base_version_id).maybeSingle();
+    if (vErr) throw vErr;
+    if (v) baseVersion = { id: v.id, label: v.label, versionNo: v.version_no };
+  }
+  res.json({ data: { model, revision: data.revision, baseVersion, updatedAt: data.updated_at }, ...(warnings.length ? { warnings } : {}) });
 }));
 
 // ── Draft 저장 (낙관적 잠금) ──────────────────────────────────
