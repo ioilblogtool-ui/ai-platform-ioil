@@ -1,6 +1,6 @@
 // 샘플 프로젝트 `sample-reports` (Sprint 4 Step 4 · D-27 · Q4).
 // AI Platform 리포트 조회(Vercel → Railway → Supabase)를 비식별로 옮긴 Logical 설계와 개요.
-// 실제 URL·키·IP·계정은 넣지 않는다. 요구사항 시드·연결은 Sprint 5 (U3).
+// 실제 URL·키·IP·계정은 넣지 않는다. 요구사항 시드(NFR 2·FR 1)와 모델 연결은 Sprint 5 Step 5 (Q10).
 const { emptyModel } = require('../empty-model');
 
 const README = [
@@ -21,7 +21,30 @@ const README = [
   '',
 ].join('\n');
 
-function model() {
+// 시드 요구사항 (Sprint 5 Q10). 코드는 생성 시 aa_next_code로 받는다 — 새 프로젝트라 NFR-001·NFR-002·FR-001.
+const REQUIREMENTS = Object.freeze([
+  {
+    key: 'nfr_latency', kind: 'nfr', category: 'performance', priority: 'must',
+    title: '리포트 조회 응답 시간', target: 'p95 < 300ms', metric: '업무 시간대 Reports API 응답 시간 p95',
+    description: '월별 리포트 조회 API는 업무 시간대 부하에서도 p95 300ms 안에 응답한다.',
+    components: ['cmp_reports_api'],
+  },
+  {
+    key: 'nfr_db_availability', kind: 'nfr', category: 'availability', priority: 'should',
+    title: '리포트 DB 가용성', target: '월 99.9%', metric: '월간 DB 접속 가능 시간 비율',
+    description: 'Reports DB 장애가 리포트 조회 중단으로 이어지는 시간을 월 43분 이내로 줄인다.',
+    components: ['cmp_reports_db'],
+  },
+  {
+    key: 'fr_monthly_report', kind: 'fr', category: null, priority: 'must',
+    title: '월별 리포트 조회', target: null, metric: null,
+    description: '로그인한 사용자는 자기 월별 리포트만 조회한다.',
+    components: ['cmp_web_app', 'cmp_reports_api'], relations: ['rel_web_api'],
+  },
+]);
+
+/** links: { [요구사항 key]: 요구사항 UUID } — 없으면 연결 없는 모델 (Sprint 4와 같음) */
+function model(links = {}) {
   const m = emptyModel();
   const c = (id, type, name, technology, properties = {}) => ({
     id, type, layer: 'logical', name, technology, properties, requirementIds: [], decisionIds: [],
@@ -49,7 +72,13 @@ function model() {
     { id: 'nd_auth', kind: 'component', componentId: 'cmp_auth', position: { x: 352, y: 320 } },
   ];
   m.views[0].edges = Object.keys(m.relations).map((relationId) => ({ id: `ed_${relationId.slice(4)}`, relationId }));
+  for (const req of REQUIREMENTS) {
+    const id = links[req.key];
+    if (!id) continue;
+    for (const cid of req.components ?? []) m.components[cid].requirementIds.push(id);
+    for (const rid of req.relations ?? []) m.relations[rid].requirementIds.push(id);
+  }
   return m;
 }
 
-module.exports = { key: 'sample-reports', defaultName: 'AI Platform Reports (샘플)', readmeMd: README, model };
+module.exports = { key: 'sample-reports', defaultName: 'AI Platform Reports (샘플)', readmeMd: README, model, requirements: REQUIREMENTS };

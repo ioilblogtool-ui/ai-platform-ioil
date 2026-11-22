@@ -12,6 +12,7 @@ const { emptyModel, README_TEMPLATE } = require('../../lib/aa/empty-model');
 
 const { reconcile } = require('../../lib/aa/requirement-refs');
 const sampleReports = require('../../lib/aa/templates/sample-reports');
+const { createSampleProject, SampleSeedError } = require('../../lib/aa/sample-project');
 
 // 새 프로젝트 템플릿 (empty는 기본). 샘플 모델은 SQL 변경 없이 aa_create_project의 p_model로 넘긴다
 const TEMPLATES = { [sampleReports.key]: sampleReports };
@@ -118,12 +119,27 @@ router.post('/', wrap(async (req, res) => {
     return sendError(res, 400, 'VALIDATION_FAILED', `지원하지 않는 템플릿입니다. (${['empty', ...Object.keys(TEMPLATES)].join(', ')})`);
   }
 
+  if (sample) {
+    // 샘플: 프로젝트 + Draft + 요구사항 시드. 시드가 실패하면 만든 프로젝트를 지우고 500 (Q10)
+    try {
+      const { project } = await createSampleProject(supabase, {
+        userId: req.user.id, name: name.trim(), description: description ?? null, readmeMd: readmeMd ?? sample.readmeMd, sample,
+      });
+      return res.status(201).json({ data: toProject(project, { draftRevision: 1 }) });
+    } catch (err) {
+      if (!(err instanceof SampleSeedError)) throw err;
+      return sendError(res, 500, 'SAMPLE_SEED_FAILED', err.compensated
+        ? '샘플 요구사항을 만들지 못했습니다. 프로젝트는 만들지 않았습니다. 잠시 후 다시 시도하세요.'
+        : '샘플 요구사항을 만들지 못했습니다. 목록에 "[샘플 생성 실패]" 프로젝트가 남았다면 삭제해 주세요.');
+    }
+  }
+
   const { data, error } = await supabase.rpc('aa_create_project', {
     p_user: req.user.id,
     p_name: name.trim(),
     p_description: description ?? null,
-    p_readme_md: readmeMd ?? (sample ? sample.readmeMd : README_TEMPLATE),
-    p_model: sample ? sample.model() : emptyModel(),
+    p_readme_md: readmeMd ?? README_TEMPLATE,
+    p_model: emptyModel(),
   });
   if (error) throw error;
   res.status(201).json({ data: toProject(data, { draftRevision: 1 }) });

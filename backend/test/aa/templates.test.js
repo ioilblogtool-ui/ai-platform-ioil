@@ -48,7 +48,10 @@ describe('POST /projects with template', { skip: dbSkipReason }, () => {
     assert.equal(res.body.data.readmeMd, sample.readmeMd);
     const d = await api(A).get(`/api/aa/projects/${res.body.data.id}/architecture`);
     assert.equal(d.body.data.revision, 1);
-    assert.deepEqual(canonical(d.body.data.model), canonical(sample.model()));
+    // Sprint 5: 시드 요구사항 UUID로 연결된 모델 (sample-seed.test.js에서 코드·연결 상세 검증)
+    const reqs = (await api(A).get(`/api/aa/projects/${res.body.data.id}/requirements`)).body.data;
+    const links = Object.fromEntries(sample.requirements.map((r, i) => [r.key, reqs[i].id]));
+    assert.deepEqual(canonical(d.body.data.model), canonical(sample.model(links)));
   });
 
   it('keeps the explicit overview when one is given', async () => {
