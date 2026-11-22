@@ -1,5 +1,6 @@
 // POST /api/aa/projects/:projectId/export (Sprint 4 Step 5 · Sprint 5 Step 1 · 05 §7.6).
-// 형식: readme-md (Sprint 4), ai-md · ai-json · mermaid (Sprint 5). 원본은 Draft(버전 기준은 Sprint 6).
+// 형식: readme-md (Sprint 4), ai-md · ai-json · mermaid (Sprint 5).
+// 원본(Sprint 6): draft | version(versionId) | latest(README 전용: 최신 발행본, 없으면 Draft). 버전 기준은 그 버전의 모델·요구사항 스냅샷·개요 스냅샷.
 // 최종 출력 전체를 검사한다:
 //   차단(키·토큰·PEM) → 422, 본문·확인 ID 없음.  경고(IP·내부 도메인·이메일) → 422 + scanId, 본문 없음.
 //   사용자가 확인하고 acknowledgedScan을 보내면 출력을 새로 만들어 다시 검사하고, binding이 같을 때만 200.
@@ -14,6 +15,7 @@ const { buildAskAi, TEMPLATES } = require('../../lib/aa/export-builder');
 const { normalizeModel } = require('../../lib/aa/normalize');
 const { toMermaidFlowchart } = require('../../lib/aa/mermaid-export');
 const { createScanStore, contentHash } = require('../../lib/aa/scan-store');
+const { basisFileTag, snapshotRequirements } = require('../../lib/aa/export-basis');
 
 const router = express.Router({ mergeParams: true });
 const scans = createScanStore();
@@ -80,9 +82,16 @@ router.post('/', wrap(async (req, res) => {
     const later = LATER.has(format) ? ' (이후 Sprint에서 지원)' : '';
     return sendError(res, 400, 'UNSUPPORTED_EXPORT_FORMAT', `지원하지 않는 내보내기 형식입니다${later}. 지원: readme-md, ai-md, ai-json, mermaid.`);
   }
-  if (source !== undefined && !(source && typeof source === 'object' && (source.type === 'latest' || source.type === 'draft'))) {
-    return sendError(res, 400, 'VALIDATION_FAILED', 'source는 { type: "latest" } 또는 { type: "draft" }여야 합니다. (버전 기준은 Sprint 6)');
+  const sourceOk = source === undefined || (source && typeof source === 'object' && (
+    source.type === 'draft' || source.type === 'latest' || (source.type === 'version' && typeof source.versionId === 'string' && UUID_RE.test(source.versionId))));
+  if (!sourceOk) {
+    return sendError(res, 400, 'VALIDATION_FAILED', 'source는 { type: "draft" }, { type: "version", versionId } 또는 (README만) { type: "latest" }여야 합니다.');
   }
+  if (source?.type === 'latest' && format !== 'readme-md') {
+    return sendError(res, 400, 'VALIDATION_FAILED', '"latest"는 README 전용입니다. Ask AI·Mermaid는 draft 또는 version을 고르세요.');
+  }
+  // 기본: README는 최신 발행본(RDM-02), 나머지는 Draft
+  const sourceType = source?.type ?? (format === 'readme-md' ? 'latest' : 'draft');
   if (acknowledgedScan !== undefined && acknowledgedScan !== null && typeof acknowledgedScan !== 'string') {
     return sendError(res, 400, 'VALIDATION_FAILED', 'acknowledgedScan은 문자열이어야 합니다.');
   }
@@ -92,38 +101,59 @@ router.post('/', wrap(async (req, res) => {
     if (problem) return sendError(res, problem.status, problem.code, problem.message);
   }
 
-  const [project, draft, reqs] = await Promise.all([
+  const versionCols = 'id, label, version_no, created_at';
+  const [project, draft, reqs, latestV] = await Promise.all([
     supabase.from('aa_projects').select('name, readme_md').eq('id', req.project.id).eq('user_id', req.user.id).maybeSingle(),
     supabase.from('aa_architecture_drafts').select('model, revision').eq('project_id', req.project.id).eq('user_id', req.user.id).maybeSingle(),
     supabase.from('aa_requirements').select('id, code, kind, title, category, target, metric, status')
       .eq('project_id', req.project.id).eq('user_id', req.user.id).range(0, 999),
+    supabase.from('aa_architecture_versions').select(versionCols)
+      .eq('project_id', req.project.id).eq('user_id', req.user.id).order('version_no', { ascending: false }).limit(1).maybeSingle(),
   ]);
-  for (const r of [project, draft, reqs]) if (r.error) throw r.error;
+  for (const r of [project, draft, reqs, latestV]) if (r.error) throw r.error;
   if (!project.data || !draft.data) return sendError(res, 404, 'NOT_FOUND', '프로젝트를 찾을 수 없습니다.');
+
+  // 원본 결정: 버전이면 그 버전의 모델·요구사항 스냅샷·개요 스냅샷 (Sprint 6 Q12·Q15)
+  const versionId = sourceType === 'version' ? source.versionId : sourceType === 'latest' ? latestV.data?.id ?? null : null;
+  let version = null;
+  if (versionId) {
+    const v = await supabase.from('aa_architecture_versions')
+      .select(`${versionCols}, model, readme_md, requirements_snapshot`)
+      .eq('project_id', req.project.id).eq('user_id', req.user.id).eq('id', versionId).maybeSingle();
+    if (v.error) throw v.error;
+    if (!v.data) return sendError(res, 404, 'NOT_FOUND', '버전을 찾을 수 없습니다.');
+    version = v.data;
+  }
 
   const readAt = new Date();
   const revision = draft.data.revision;
-  const projectInfo = { name: project.data.name, readmeMd: project.data.readme_md };
+  const basis = version
+    ? { source: 'version', label: version.label, publishedAt: version.created_at }
+    : { source: 'draft', revision, latestLabel: latestV.data?.label ?? null };
+  const model = version ? version.model : draft.data.model;
+  const requirementList = version ? snapshotRequirements(version.requirements_snapshot) : (reqs.data ?? []);
+  const projectInfo = { name: project.data.name, readmeMd: version ? version.readme_md : project.data.readme_md };
+  const tag = basisFileTag(basis);
   const slug = slugify(project.data.name);
   let out;            // { content, hashBody, filename, contentType, extra, bindingExtra }
 
   if (format === 'readme-md') {
-    const built = buildReadme({ project: projectInfo, model: draft.data.model, revision, requirements: reqs.data ?? [], sections });
+    const built = buildReadme({ project: projectInfo, model, revision, basis, requirements: requirementList, sections });
     out = {
       content: built.body + readmeFooter(readAt), hashBody: built.body, filename: built.filename, contentType: 'text/markdown',
       extra: { sections: built.sections }, bindingExtra: { sections: built.sections },
     };
   } else if (format === 'mermaid') {
     // Logical 전체 전용 (Q5). 별칭 없이 이름. 리뷰 연결 대상이 아니다
-    const text = toMermaidFlowchart(normalizeModel(draft.data.model, { requirements: reqs.data ?? [] }));
+    const text = toMermaidFlowchart(normalizeModel(model, { requirements: requirementList }));
     out = {
-      content: text, hashBody: text, filename: `${slug}_logical_draft-rev${revision}.mmd`, contentType: 'text/plain',
+      content: text, hashBody: text, filename: `${slug}_logical_${tag}.mmd`, contentType: 'text/plain',
       extra: { scopeLabel: 'Logical View 전체' }, bindingExtra: { format },
     };
   } else {
     const bundleId = `bx_${crypto.randomBytes(8).toString('base64url').replace(/[-_]/g, 'x').slice(0, 10)}`;
     const built = buildAskAi({
-      project: projectInfo, model: draft.data.model, revision, requirements: reqs.data ?? [], format,
+      project: projectInfo, model, revision, basis, requirements: requirementList, format,
       scope: body.scope, template: body.template ?? 'design-review', question: body.question ?? '', bundleId, readAt: readAt.toISOString(),
     });
     if (built.error) {
@@ -134,7 +164,7 @@ router.post('/', wrap(async (req, res) => {
     const date = readAt.toISOString().slice(0, 10);
     out = {
       content: built.content, hashBody: built.hashBody,
-      filename: `${slug}_${scopeSlug}_rev${revision}_${date}.${format === 'ai-json' ? 'json' : 'md'}`,
+      filename: `${slug}_${scopeSlug}_${version ? tag : `rev${revision}`}_${date}.${format === 'ai-json' ? 'json' : 'md'}`,
       contentType: format === 'ai-json' ? 'application/json' : 'text/markdown',
       extra: { bundleId, scopeLabel: built.scopeLabel, omitted: built.omitted, counts: built.counts, template: body.template ?? 'design-review' },
       bindingExtra: { format, scope: scopeKey(body.scope), template: body.template ?? 'design-review', question: String(body.question ?? '').trim() },
@@ -148,7 +178,7 @@ router.post('/', wrap(async (req, res) => {
       '내보낼 내용에 키·토큰으로 보이는 값이 있어 내보낼 수 없습니다. 해당 값을 지운 뒤 다시 시도하세요.',
       { issues: scan.blocks, confirmable: false, scanId: null });
   }
-  const binding = { userId: req.user.id, projectId: req.project.id, revision, sections: out.bindingExtra, contentHash: hash };
+  const binding = { userId: req.user.id, projectId: req.project.id, revision: version ? `version:${version.id}` : `draft:${revision}`, sections: out.bindingExtra, contentHash: hash };
   if (scan.warnings.length && !(acknowledgedScan && scans.verify(acknowledgedScan, binding))) {
     return sendError(res, 422, 'SENSITIVE_DATA_DETECTED',
       '내보낼 내용에 IP·내부 도메인·이메일로 보이는 값이 있습니다. 확인한 뒤 계속할 수 있습니다.',
@@ -161,7 +191,9 @@ router.post('/', wrap(async (req, res) => {
       contentType: out.contentType,
       content: out.content,
       contentHash: hash,
-      basis: { source: 'draft', revision, readAt: readAt.toISOString() },
+      basis: version
+        ? { source: 'version', versionId: version.id, label: version.label, versionNo: version.version_no, publishedAt: version.created_at, readAt: readAt.toISOString() }
+        : { source: 'draft', revision, readAt: readAt.toISOString() },
       approxTokens: Math.ceil(out.content.length / 4),
       ...out.extra,
       ...(scan.warnings.length ? { acknowledgedWarnings: scan.warnings.length } : {}),

@@ -179,11 +179,18 @@ export interface TypeRegistry {
   types: Record<string, TypeDef>;
 }
 
+// ── 내보내기 기준 (Sprint 6 Step 4) ──
+/** README는 latest(최신 발행본, 없으면 Draft)를 쓸 수 있고, Ask AI·Mermaid는 draft·version만 */
+export type ExportSource = { type: 'draft' } | { type: 'latest' } | { type: 'version'; versionId: string };
+export type ExportBasis =
+  | { source: 'draft'; revision: number; readAt: string }
+  | { source: 'version'; versionId: string; label: string; versionNo: number; publishedAt: string; readAt: string };
+
 // ── README.md 내보내기 (Sprint 4 Step 5) ──
 export type ReadmeSections = { overview: boolean; logicalDiagram: boolean; nfr: boolean };
 export interface ReadmeExportRequest {
   format: 'readme-md';
-  source?: { type: 'latest' | 'draft' };
+  source?: ExportSource;
   sections?: Partial<ReadmeSections>;
   acknowledgedScan?: string | null;
 }
@@ -193,7 +200,7 @@ export interface ReadmeExportResult {
   content: string;
   contentHash: string;
   sections: ReadmeSections;
-  basis: { source: 'draft'; revision: number; readAt: string };
+  basis: ExportBasis;
   approxTokens: number;
   acknowledgedWarnings?: number;
 }
@@ -207,7 +214,7 @@ export type AskAiScope =
   | { type: 'requirement'; requirementId: string };
 export interface AskAiExportRequest {
   format: AskAiFormat;
-  source?: { type: 'latest' | 'draft' };
+  source?: { type: 'draft' } | { type: 'version'; versionId: string };
   scope?: AskAiScope;
   template?: AskAiTemplate;
   question?: string;
@@ -219,7 +226,7 @@ export interface AskAiExportResult {
   contentType: string;
   content: string;
   contentHash: string;
-  basis: { source: 'draft'; revision: number; readAt: string };
+  basis: ExportBasis;
   approxTokens: number;
   bundleId?: string;
   scopeLabel?: string;
@@ -234,7 +241,8 @@ export interface AskAiExportResult {
 export interface ReviewBundle {
   bundleId: string;
   format: 'ai-md' | 'ai-json';
-  basis: { revision: number };
+  /** Draft 기준(Sprint 5 저장분은 source 없이 revision만) 또는 버전 기준 (Sprint 6) */
+  basis: { source?: 'draft'; revision: number } | { source: 'version'; versionId: string; label: string };
   scopeLabel: string;
   scope: AskAiScope;
   template: AskAiTemplate;

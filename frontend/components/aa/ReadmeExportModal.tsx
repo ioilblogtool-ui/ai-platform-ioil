@@ -8,15 +8,16 @@ import Button from '@/components/Button';
 import MarkdownPreview from '@/components/MarkdownPreview';
 import { AaApiError, exportReadme } from '@/lib/aa/architecture-api';
 import type { ReadmeExportResult, ReadmeSections, SensitiveScanDetails } from '@/lib/aa/architecture-types';
-import { classifyScan, recheckDecision, ruleLabel, type ExportOutcome } from '@/lib/aa/export-flow';
+import { basisLabel, classifyScan, recheckDecision, ruleLabel, type ExportOutcome } from '@/lib/aa/export-flow';
+import BasisSelect, { toSource, type BasisValue } from '@/components/aa/BasisSelect';
 
 const SECTION_LABELS: [keyof ReadmeSections, string][] = [
   ['overview', '프로젝트 개요'], ['logicalDiagram', 'Logical 구성도 (Mermaid)'], ['nfr', '비기능 요구사항 (NFR)'],
 ];
 
-async function requestExport(projectId: string, sections: ReadmeSections, ack: string | null): Promise<ExportOutcome> {
+async function requestExport(projectId: string, sections: ReadmeSections, basis: BasisValue, ack: string | null): Promise<ExportOutcome> {
   try {
-    const result = await exportReadme(projectId, { format: 'readme-md', source: { type: 'latest' }, sections, acknowledgedScan: ack });
+    const result = await exportReadme(projectId, { format: 'readme-md', source: toSource(basis), sections, acknowledgedScan: ack });
     return { kind: 'ok', result };
   } catch (error) {
     if (error instanceof AaApiError && error.status === 422) {
@@ -29,6 +30,7 @@ async function requestExport(projectId: string, sections: ReadmeSections, ack: s
 
 export default function ReadmeExportModal({ projectId, projectName, onClose }: { projectId: string; projectName: string; onClose: () => void }) {
   const [sections, setSections] = useState<ReadmeSections>({ overview: true, logicalDiagram: true, nfr: true });
+  const [basis, setBasis] = useState<BasisValue>('latest');   // RDM-02: 기본은 최신 발행본
   const [preview, setPreview] = useState<ReadmeExportResult | null>(null);
   const [scan, setScan] = useState<SensitiveScanDetails | null>(null);
   const [ack, setAck] = useState<string | null>(null);
@@ -47,22 +49,22 @@ export default function ReadmeExportModal({ projectId, projectName, onClose }: {
     else { setScan(outcome.details); setError(null); }
   }, []);
 
-  const load = useCallback(async (next: ReadmeSections, useAck: string | null) => {
+  const load = useCallback(async (next: ReadmeSections, useAck: string | null, nextBasis: BasisValue) => {
     const my = ++seq.current;
     setBusy(true);
-    const outcome = await requestExport(projectId, next, useAck);
+    const outcome = await requestExport(projectId, next, nextBasis, useAck);
     if (my !== seq.current) return;
     show(outcome, useAck);
     setBusy(false);
   }, [projectId, show]);
 
-  useEffect(() => { void load(sections, null); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(sections, null, basis); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggle(key: keyof ReadmeSections) {
     const next = { ...sections, [key]: !sections[key] };
     setSections(next);
     setNotice(null);
-    void load(next, null);   // 구역이 바뀌면 이전 확인은 무효
+    void load(next, null, basis);   // 구역이 바뀌면 이전 확인은 무효
   }
 
   async function output(kind: 'copy' | 'download') {
@@ -70,13 +72,13 @@ export default function ReadmeExportModal({ projectId, projectName, onClose }: {
     const my = ++seq.current;
     setBusy(true);
     setNotice(null);
-    const outcome = await requestExport(projectId, sections, ack);
+    const outcome = await requestExport(projectId, sections, basis, ack);
     if (my !== seq.current) return;
     setBusy(false);
     const decision = recheckDecision(preview, outcome);
     if (decision.action === 'refresh') {
       setPreview(decision.result);
-      setNotice('그 사이 설계나 개요가 바뀌었습니다. 갱신된 미리보기를 확인한 뒤 다시 누르세요.');
+      setNotice('그 사이 설계·개요 또는 최신 발행본이 바뀌었습니다. 갱신된 미리보기를 확인한 뒤 다시 누르세요.');
       return;
     }
     if (decision.action === 'warn' || decision.action === 'block' || decision.action === 'error') {
@@ -113,13 +115,16 @@ export default function ReadmeExportModal({ projectId, projectName, onClose }: {
           <b style={{ fontSize: 15 }}>README.md 내보내기</b>
           <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>{projectName}</span>
           <span data-testid="aa-readme-basis" style={{ fontSize: 12, color: '#c8a96e' }}>
-            {preview ? `기준: Draft rev ${preview.basis.revision}` : ''}
+            {preview ? `기준: ${basisLabel(preview.basis)}` : ''}
           </span>
           <span style={{ flex: 1 }} />
           <Button variant="ghost" onClick={onClose}>닫기</Button>
         </div>
 
         <div style={{ padding: '12px 20px', display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 13 }}>
+          <span style={{ color: 'rgba(255,255,255,0.5)' }}>기준</span>
+          <BasisSelect projectId={projectId} value={basis} allowLatest testId="aa-readme-source"
+            onChange={(v) => { setBasis(v); setNotice(null); void load(sections, null, v); }} />
           <span style={{ color: 'rgba(255,255,255,0.5)' }}>포함할 구역</span>
           {SECTION_LABELS.map(([key, label]) => (
             <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
@@ -145,7 +150,7 @@ export default function ReadmeExportModal({ projectId, projectName, onClose }: {
                 ? <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
                     <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>외부에 공유해도 되는 값인지 확인하세요. 확인은 10분 동안, 지금 내용 그대로일 때만 유효합니다.</span>
                     <span style={{ flex: 1 }} />
-                    <Button variant="primary" disabled={busy} onClick={() => void load(sections, scan.scanId)} data-testid="aa-readme-ack">확인하고 계속</Button>
+                    <Button variant="primary" disabled={busy} onClick={() => void load(sections, scan.scanId, basis)} data-testid="aa-readme-ack">확인하고 계속</Button>
                   </div>
                 : <div style={{ marginTop: 10, fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>해당 값을 개요·설계에서 지운 뒤 다시 여세요.</div>}
             </div>

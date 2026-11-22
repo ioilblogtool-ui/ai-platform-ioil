@@ -9,7 +9,7 @@ import Button from '@/components/Button';
 import { AaApiError, addReviewAnswer, createManualReview, getAaUserId } from '@/lib/aa/architecture-api';
 import type { ReviewAnswer } from '@/lib/aa/architecture-types';
 import { bundleKey, readBundles, TEMPLATE_LABEL, type StoredBundle } from '@/lib/aa/bundle-store';
-import { ruleLabel } from '@/lib/aa/export-flow';
+import { basisLabel, ruleLabel } from '@/lib/aa/export-flow';
 
 const TOOLS = ['ChatGPT', 'Claude', 'Gemini', 'Copilot'];
 const ANSWER_MAX_BYTES = 256 * 1024;
@@ -125,7 +125,7 @@ export default function PasteAnswerModal({ projectId, reviewId, answers = [], on
                 <select value={bundleId} onChange={(e) => setBundleId(e.target.value)} data-testid="aa-paste-bundle" style={input}>
                   {bundles.map((b) => (
                     <option key={b.bundleId} value={b.bundleId}>
-                      {new Date(b.copiedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} · {b.scopeLabel} · {TEMPLATE_LABEL[b.template] ?? b.template} · rev {b.basis.revision}
+                      {new Date(b.copiedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} · {b.scopeLabel} · {TEMPLATE_LABEL[b.template] ?? b.template} · {basisLabel(b.basis)}
                     </option>
                   ))}
                   <option value={NO_BUNDLE}>번들 연결 안 함 (현재 Draft 기준으로 기록)</option>
@@ -181,7 +181,7 @@ export default function PasteAnswerModal({ projectId, reviewId, answers = [], on
 
         <div style={{ padding: '12px 20px', borderTop: '1px solid rgba(255,255,255,0.07)', display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
-            {adding ? '같은 리뷰에 기록됩니다' : bundle ? `기준: 번들 rev ${bundle.basis.revision}` : '기준: 저장 시점의 Draft'}
+            {adding ? '같은 리뷰에 기록됩니다' : bundle ? `기준: 번들 ${basisLabel(bundle.basis)}` : '기준: 저장 시점의 Draft'}
           </span>
           <span style={{ flex: 1 }} />
           <Button onClick={onClose}>취소</Button>

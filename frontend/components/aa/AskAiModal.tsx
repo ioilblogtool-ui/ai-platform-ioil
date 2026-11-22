@@ -11,14 +11,18 @@ import MarkdownPreview from '@/components/MarkdownPreview';
 import { AaApiError, exportAskAi, getAaUserId, listRequirements } from '@/lib/aa/architecture-api';
 import type { AskAiExportResult, AskAiFormat, AskAiScope, AskAiTemplate, Requirement, SensitiveScanDetails } from '@/lib/aa/architecture-types';
 import { bundleKey, rememberBundle, TEMPLATE_LABEL } from '@/lib/aa/bundle-store';
-import { classifyScan, recheckDecision, ruleLabel, type ExportOutcome } from '@/lib/aa/export-flow';
+import { basisLabel, classifyScan, recheckDecision, ruleLabel, type ExportOutcome } from '@/lib/aa/export-flow';
+import BasisSelect, { type BasisValue } from '@/components/aa/BasisSelect';
 
 type ScopeType = AskAiScope['type'];
 const FORMATS: [AskAiFormat, string][] = [['ai-md', 'AI용 Markdown'], ['ai-json', 'AI용 JSON'], ['mermaid', 'Mermaid']];
 const TEMPLATES = Object.keys(TEMPLATE_LABEL) as AskAiTemplate[];
 const QUESTION_MAX = 2000;
 
-interface Settings { format: AskAiFormat; scopeType: ScopeType; requirementId: string; template: AskAiTemplate; question: string }
+interface Settings { format: AskAiFormat; basis: BasisValue; scopeType: ScopeType; requirementId: string; template: AskAiTemplate; question: string }
+
+// Ask AI는 05 §7.6대로 latest를 쓰지 않는다 — Draft(기본) 또는 버전
+const sourceOf = (b: BasisValue) => (b === 'draft' || b === 'latest' ? { type: 'draft' as const } : { type: 'version' as const, versionId: b });
 
 function buildScope(s: Settings, componentIds: string[]): AskAiScope {
   if (s.scopeType === 'view') return { type: 'view', viewId: 'view_logical' };
@@ -30,8 +34,8 @@ function buildScope(s: Settings, componentIds: string[]): AskAiScope {
 async function requestExport(projectId: string, s: Settings, componentIds: string[], ack: string | null): Promise<ExportOutcome<AskAiExportResult>> {
   try {
     const body = s.format === 'mermaid'
-      ? { format: s.format, source: { type: 'latest' as const }, acknowledgedScan: ack }
-      : { format: s.format, source: { type: 'latest' as const }, scope: buildScope(s, componentIds), template: s.template, question: s.question.trim(), acknowledgedScan: ack };
+      ? { format: s.format, source: sourceOf(s.basis), acknowledgedScan: ack }
+      : { format: s.format, source: sourceOf(s.basis), scope: buildScope(s, componentIds), template: s.template, question: s.question.trim(), acknowledgedScan: ack };
     return { kind: 'ok', result: await exportAskAi(projectId, body) };
   } catch (error) {
     if (error instanceof AaApiError && error.status === 422) {
@@ -54,7 +58,7 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
   onCopied?: () => void;
 }) {
   const [settings, setSettings] = useState<Settings>({
-    format: 'ai-md', scopeType: initialSelection?.length ? 'components' : 'project', requirementId: '', template: 'design-review', question: '',
+    format: 'ai-md', basis: 'draft', scopeType: initialSelection?.length ? 'components' : 'project', requirementId: '', template: 'design-review', question: '',
   });
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [selectedComponentIds] = useState<string[]>(() => initialSelection ?? []);
@@ -148,7 +152,10 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
       let storage: Storage | null = null;
       try { storage = window.sessionStorage; } catch { storage = null; }
       const saved = userId ? rememberBundle(storage, bundleKey(userId, projectId), {
-        bundleId: result.bundleId, format: settings.format, basis: { revision: result.basis.revision },
+        bundleId: result.bundleId, format: settings.format,
+        basis: result.basis.source === 'version'
+          ? { source: 'version', versionId: result.basis.versionId, label: result.basis.label }
+          : { source: 'draft', revision: result.basis.revision },
         scopeLabel: result.scopeLabel ?? '', scope: buildScope(settings, selectedComponentIds),
         template: settings.template, question: settings.question.trim(), bundleMd: result.content,
       }) : false;
@@ -172,7 +179,7 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
         <div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', gap: 10 }}>
           <b style={{ fontSize: 15 }}>내보내기 · AI 검토 자료</b>
           <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>{projectName}</span>
-          <span data-testid="aa-askai-basis" style={{ fontSize: 12, color: '#c8a96e' }}>{preview ? `기준: Draft rev ${preview.basis.revision}` : ''}</span>
+          <span data-testid="aa-askai-basis" style={{ fontSize: 12, color: '#c8a96e' }}>{preview ? `기준: ${basisLabel(preview.basis)}` : ''}</span>
           <span style={{ flex: 1 }} />
           <Button variant="ghost" onClick={onClose}>닫기</Button>
         </div>
@@ -180,7 +187,11 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           {/* 설정 */}
           <div style={{ width: 300, flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.06)', padding: '14px 16px', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {unsaved && <div role="status" data-testid="aa-askai-unsaved" style={{ fontSize: 12, color: '#f5a524' }}>저장되지 않은 변경은 포함되지 않습니다. 먼저 저장하세요.</div>}
+            {unsaved && settings.basis === 'draft' && <div role="status" data-testid="aa-askai-unsaved" style={{ fontSize: 12, color: '#f5a524' }}>저장되지 않은 변경은 포함되지 않습니다. 먼저 저장하세요.</div>}
+            <Field label="기준">
+              <BasisSelect projectId={projectId} value={settings.basis} allowLatest={false} testId="aa-askai-source" onChange={(v) => change({ basis: v })} />
+              {settings.basis !== 'draft' && <Hint>발행 당시 설계·요구사항으로 만듭니다.</Hint>}
+            </Field>
             <Field label="형식">
               {FORMATS.map(([f, label]) => (
                 <label key={f} style={radio}><input type="radio" name="aa-askai-format" checked={settings.format === f} onChange={() => change({ format: f })} data-testid={`aa-askai-format-${f}`} />{label}</label>

@@ -32,3 +32,27 @@ describe('classifyScan', () => {
     assert.equal(ruleLabel('unknown'), 'unknown');
   });
 });
+
+// Sprint 6 Step 4 — 버전 기준도 같은 규칙으로 비교한다
+import { basisKey, basisLabel } from '../../lib/aa/export-flow.ts';
+
+describe('version basis', () => {
+  const vPreview = { contentHash: 'h1', basis: { source: 'version', versionId: 'v-1', label: 'v1.0', versionNo: 1, publishedAt: '2026-11-22T07:00:00Z', readAt: 't' } };
+  const vResult = (hash, versionId) => ({ filename: 'f', contentType: 't', content: 'c', contentHash: hash, sections: {}, approxTokens: 1,
+    basis: { source: 'version', versionId, label: 'v', versionNo: 1, publishedAt: 'p', readAt: 't2' } });
+
+  it('outputs only for the same version and hash', () => {
+    assert.equal(recheckDecision(vPreview, { kind: 'ok', result: vResult('h1', 'v-1') }).action, 'output');
+    assert.equal(recheckDecision(vPreview, { kind: 'ok', result: vResult('h1', 'v-2') }).action, 'refresh', 'latest moved to a new version');
+    assert.equal(recheckDecision(preview, { kind: 'ok', result: vResult('h1', 'v-1') }).action, 'refresh', 'draft → version');
+  });
+
+  it('keys and labels draft and version bases', () => {
+    assert.equal(basisKey({ source: 'draft', revision: 3 }), 'draft:3');
+    assert.equal(basisKey({ revision: 3 }), 'draft:3', 'Sprint 5 bundles have no source');
+    assert.equal(basisKey({ source: 'version', versionId: 'x' }), 'version:x');
+    assert.equal(basisLabel({ source: 'draft', revision: 3 }), 'Draft rev 3');
+    assert.equal(basisLabel({ source: 'version', label: 'v1.1', publishedAt: '2026-11-22T07:00:00Z' }), 'v1.1 (발행 2026-11-22)');
+    assert.equal(basisLabel({ source: 'version', label: 'v1.1' }), 'v1.1');
+  });
+});

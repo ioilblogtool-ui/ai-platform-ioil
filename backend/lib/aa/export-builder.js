@@ -3,6 +3,7 @@
 // 내부 ID·좌표·노트는 출력에 넣지 않는다. bundleId·읽은 시각은 헤더(ai-md 첫 줄 / ai-json의 두 필드)에만 넣고,
 // contentHash는 그것을 뺀 본문으로 계산한다 (같은 입력이면 같은 해시).
 const { normalizeModel } = require('./normalize');
+const { basisText, basisShort, basisJson } = require('./export-basis');
 const { toMermaidFlowchart } = require('./mermaid-export');
 
 const TEMPLATES = Object.freeze({
@@ -71,7 +72,8 @@ function resolveScope(n, scope, requirements) {
  * @returns {{ content: string, hashBody: string, filenameStem: string, scopeLabel: string,
  *             counts: { components: number, relations: number }, omitted: { components: number } } | { error: string }}
  */
-function buildAskAi({ project, model, revision, requirements = [], format, scope, template = 'design-review', question = '', bundleId, readAt }) {
+function buildAskAi({ project, model, revision, basis, requirements = [], format, scope, template = 'design-review', question = '', bundleId, readAt }) {
+  const b = basis ?? { source: 'draft', revision };   // Sprint 6: 버전 기준이면 { source: 'version', label, publishedAt }
   if (!Object.hasOwn(TEMPLATES, template)) return { error: 'template' };
   const q = String(question ?? '').trim();
   if (q.length > QUESTION_MAX) return { error: 'question' };
@@ -100,7 +102,6 @@ function buildAskAi({ project, model, revision, requirements = [], format, scope
     ? allReqs
     : allReqs.filter((r) => reqCodesInScope.has(r.code));
   const omitted = { components: n.components.length - comps.length };
-  const basisText = `Draft rev ${revision}`;
   const templateText = TEMPLATES[template];
 
   const outComponents = comps.map((c) => ({
@@ -118,7 +119,7 @@ function buildAskAi({ project, model, revision, requirements = [], format, scope
     const stable = {
       schema: 'aa-ask-ai/1',
       aliasNote: ALIAS_NOTE,
-      basis: { source: 'draft', revision },
+      basis: basisJson(b),
       scope: { label: resolved.label },
       template, question: q || null, instruction: templateText || null,
       project: { name: project.name, summary: overviewSummary(project.readmeMd) || null },
@@ -136,9 +137,9 @@ function buildAskAi({ project, model, revision, requirements = [], format, scope
 
   // ai-md
   const lines = [];
-  lines.push(`<!-- AA Workbench export · bundle ${bundleId} · ${String(project.name).replace(/--+/g, '-')} · ${basisText} · 읽은 시각 ${readAt} -->`);
+  lines.push(`<!-- AA Workbench export · bundle ${bundleId} · ${String(project.name).replace(/--+/g, '-')} · ${basisShort(b)} · 읽은 시각 ${readAt} -->`);
   const body = [];
-  body.push(`> ${ALIAS_NOTE}`, `> 기준: ${basisText} (발행 버전 없음) · 범위: ${resolved.label}`, '');
+  body.push(`> ${ALIAS_NOTE}`, `> 기준: ${basisText(b)} · 범위: ${resolved.label}`, '');
   body.push('# 질문', '');
   if (templateText) body.push(templateText, '');
   if (q) body.push(q, '');

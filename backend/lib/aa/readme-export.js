@@ -2,6 +2,7 @@
 // 순수 함수: 입력(프로젝트·Draft·요구사항·구역)이 같으면 본문(body)이 같다. 생성 시각은 꼬리말(footer)에만 넣는다.
 // 컴포넌트는 별칭 없이 이름으로 쓴다. 내부 ID·좌표·노트는 넣지 않는다 (normalize.js).
 const { normalizeModel } = require('./normalize');
+const { basisText, basisFileTag } = require('./export-basis');
 const { toMermaidFlowchart } = require('./mermaid-export');
 
 const DEFAULT_SECTIONS = Object.freeze({ overview: true, logicalDiagram: true, nfr: true });
@@ -37,14 +38,15 @@ const CATEGORY_LABEL = {
  *           requirements?: object[], sections?: object }} input
  * @returns {{ body: string, filename: string, sections: Record<string, boolean> }}
  */
-function buildReadme({ project, model, revision, requirements = [], sections }) {
+function buildReadme({ project, model, revision, basis, requirements = [], sections }) {
+  const b = basis ?? { source: 'draft', revision };   // Sprint 6: 버전 기준이면 { source: 'version', label, publishedAt }
   const on = normalizeSections(sections);
   const n = normalizeModel(model, { requirements });
   const out = [];
 
   // ① 제목·기준 (시각은 넣지 않는다 — 꼬리말에만)
   out.push(`# ${String(project.name).replace(/\r?\n/g, ' ')}`, '');
-  out.push(`> 기준: Draft rev ${revision} (발행 버전 없음). AA Workbench에서 내보낸 문서입니다.`, '');
+  out.push(`> 기준: ${basisText(b)}. AA Workbench에서 내보낸 문서입니다.`, '');
 
   // ② 프로젝트 개요 (선택)
   if (on.overview) {
@@ -99,7 +101,7 @@ function buildReadme({ project, model, revision, requirements = [], sections }) 
 
   return {
     body: `${out.join('\n').trimEnd()}\n`,
-    filename: `README_${slugify(project.name)}_draft-rev${revision}.md`,
+    filename: `README_${slugify(project.name)}_${basisFileTag(b)}.md`,
     sections: on,
   };
 }
