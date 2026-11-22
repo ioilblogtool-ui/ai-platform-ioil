@@ -10,6 +10,7 @@ import { AaApiError, addReviewAnswer, createManualReview, getAaUserId } from '@/
 import type { ReviewAnswer } from '@/lib/aa/architecture-types';
 import { bundleKey, readBundles, TEMPLATE_LABEL, type StoredBundle } from '@/lib/aa/bundle-store';
 import { basisLabel, ruleLabel } from '@/lib/aa/export-flow';
+import BasisSelect, { type BasisValue } from '@/components/aa/BasisSelect';
 
 const TOOLS = ['ChatGPT', 'Claude', 'Gemini', 'Copilot'];
 const ANSWER_MAX_BYTES = 256 * 1024;
@@ -30,6 +31,7 @@ export default function PasteAnswerModal({ projectId, reviewId, answers = [], on
   const adding = Boolean(reviewId);
   const [bundles, setBundles] = useState<StoredBundle[] | null>(adding ? [] : null);
   const [bundleId, setBundleId] = useState<string>(NO_BUNDLE);
+  const [unlinkedBasis, setUnlinkedBasis] = useState<BasisValue>('draft');   // 번들 미연결일 때 기준 (REV-M3)
   const [toolChoice, setToolChoice] = useState('ChatGPT');
   const [toolOther, setToolOther] = useState('');
   const [answerMd, setAnswerMd] = useState('');
@@ -62,8 +64,8 @@ export default function PasteAnswerModal({ projectId, reviewId, answers = [], on
   const canSave = !saving && bundles !== null && tool.length > 0 && tool.length <= 60 && answerMd.trim().length > 0 && !tooLarge && !followTooLong;
 
   // 입력 전체가 같을 때만 같은 clientRequestId
-  const inputKey = useMemo(() => JSON.stringify([reviewId ?? null, bundle?.bundleId ?? null, tool, answerMd, followUpOf, followUpQuestion.trim()]),
-    [reviewId, bundle, tool, answerMd, followUpOf, followUpQuestion]);
+  const inputKey = useMemo(() => JSON.stringify([reviewId ?? null, bundle?.bundleId ?? null, bundle ? null : unlinkedBasis, tool, answerMd, followUpOf, followUpQuestion.trim()]),
+    [reviewId, bundle, unlinkedBasis, tool, answerMd, followUpOf, followUpQuestion]);
 
   async function save() {
     if (!canSave) return;
@@ -84,7 +86,8 @@ export default function PasteAnswerModal({ projectId, reviewId, answers = [], on
           bundleId: bundle.bundleId, format: bundle.format, basis: bundle.basis, scopeLabel: bundle.scopeLabel,
           scope: bundle.scope, template: bundle.template, question: bundle.question, bundleMd: bundle.bundleMd,
         } : null;
-        const r = await createManualReview(projectId, { bundle: payload, answer: { tool, answerMd }, clientRequestId });
+        const basis = payload || unlinkedBasis === 'draft' ? undefined : { source: 'version' as const, versionId: unlinkedBasis };
+        const r = await createManualReview(projectId, { bundle: payload, basis, answer: { tool, answerMd }, clientRequestId });
         onSaved({ reviewId: r.id, existing: r.existing });
       }
     } catch (e) {
@@ -128,9 +131,15 @@ export default function PasteAnswerModal({ projectId, reviewId, answers = [], on
                       {new Date(b.copiedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} · {b.scopeLabel} · {TEMPLATE_LABEL[b.template] ?? b.template} · {basisLabel(b.basis)}
                     </option>
                   ))}
-                  <option value={NO_BUNDLE}>번들 연결 안 함 (현재 Draft 기준으로 기록)</option>
+                  <option value={NO_BUNDLE}>번들 연결 안 함 (기준을 직접 고름)</option>
                 </select>
-                {bundles.length === 0 && <Hint>이 탭에서 복사한 검토 자료가 없습니다. 답변만 현재 Draft 기준으로 저장합니다.</Hint>}
+                {bundles.length === 0 && <Hint>이 탭에서 복사한 검토 자료가 없습니다. 답변만 기준과 함께 저장합니다.</Hint>}
+                {!bundle && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>기준</span>
+                    <BasisSelect projectId={projectId} value={unlinkedBasis} onChange={setUnlinkedBasis} allowLatest={false} testId="aa-paste-basis" />
+                  </div>
+                )}
                 {bundle?.question && <Hint>질문: {bundle.question.slice(0, 160)}</Hint>}
               </>}
             </Row>
@@ -181,7 +190,7 @@ export default function PasteAnswerModal({ projectId, reviewId, answers = [], on
 
         <div style={{ padding: '12px 20px', borderTop: '1px solid rgba(255,255,255,0.07)', display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
-            {adding ? '같은 리뷰에 기록됩니다' : bundle ? `기준: 번들 ${basisLabel(bundle.basis)}` : '기준: 저장 시점의 Draft'}
+            {adding ? '같은 리뷰에 기록됩니다' : bundle ? `기준: 번들 ${basisLabel(bundle.basis)}` : unlinkedBasis === 'draft' ? '기준: 저장 시점의 Draft (번들 미연결)' : '기준: 고른 버전 (번들 미연결)'}
           </span>
           <span style={{ flex: 1 }} />
           <Button onClick={onClose}>취소</Button>

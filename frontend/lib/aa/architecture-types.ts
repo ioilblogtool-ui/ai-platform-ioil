@@ -254,7 +254,12 @@ export interface ReviewListItem {
   mode: 'manual' | 'api';
   source: string;
   tools: string[];
-  target: { type: 'draft'; revision: number } | { type: 'version'; versionId: string };
+  /** 원래 기준 — 바뀌지 않는다 */
+  target: { type: 'draft'; revision: number } | { type: 'version'; versionId: string; label: string | null };
+  /** 지금 기준: 버전 리뷰는 최신 발행본, Draft 리뷰는 현재 revision (Sprint 6 REV-M6) */
+  current: { type: 'draft'; revision: number | null } | { type: 'version'; id: string; label: string };
+  /** 당시 요구사항 기록: 버전 스냅샷 / 보낸 번들 원문 / 없음 (Sprint 6 Q16) */
+  requirementsRecord: 'version' | 'bundle' | 'none';
   bundleLinked: boolean;
   bundleId: string | null;
   format: 'ai-md' | 'ai-json' | null;

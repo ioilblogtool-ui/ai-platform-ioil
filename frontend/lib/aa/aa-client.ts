@@ -119,7 +119,8 @@ export function createAaClient(deps: AaClientDeps) {
     async getReview(projectId: string, reviewId: string) {
       return (await request<{ data: ReviewDetail }>(`${p(projectId)}/reviews/${encodeURIComponent(reviewId)}`)).data;
     },
-    async createManualReview(projectId: string, body: { bundle: ReviewBundle | null; answer: { tool: string; answerMd: string }; clientRequestId: string }) {
+    /** bundle이 없으면 basis로 기준을 고른다(생략 = 저장 시점 현재 Draft) — Sprint 6 REV-M3 */
+    async createManualReview(projectId: string, body: { bundle: ReviewBundle | null; basis?: { source: 'draft' } | { source: 'version'; versionId: string }; answer: { tool: string; answerMd: string }; clientRequestId: string }) {
       return (await request<{ data: { id: string; answerId: string; existing: boolean } }>(`${p(projectId)}/reviews/manual`, json('POST', body))).data;
     },
     async addReviewAnswer(projectId: string, reviewId: string, body: { tool: string; answerMd: string; followUpOf?: string | null; followUpQuestion?: string | null; clientRequestId: string }) {

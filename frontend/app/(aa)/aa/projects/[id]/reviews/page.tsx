@@ -13,6 +13,7 @@ import PasteAnswerModal from '@/components/aa/PasteAnswerModal';
 import { AaApiError, getAaProject, getReview, listReviews } from '@/lib/aa/architecture-api';
 import type { ReviewDetail, ReviewListItem } from '@/lib/aa/architecture-types';
 import { TEMPLATE_LABEL } from '@/lib/aa/bundle-store';
+import { requirementsRecordNote, staleNote, targetLabel } from '@/lib/aa/review-basis';
 
 const PAGE = 50;
 const muted: CSSProperties = { color: 'rgba(255,255,255,0.45)', fontSize: 12.5 };
@@ -118,8 +119,9 @@ function Reviews({ id }: { id: string }) {
                     <span style={{ ...muted, fontSize: 11.5 }}>{fmt(r.createdAt)}</span>
                   </div>
                   <div style={{ ...muted, fontSize: 12, marginTop: 4 }}>
-                    {r.bundleLinked ? `${r.scopeLabel ?? ''} · ${r.template ? TEMPLATE_LABEL[r.template] ?? r.template : ''}` : '번들 없음'}
-                    {' · '}{r.target.type === 'draft' ? `Draft rev ${r.target.revision}` : '버전'}
+                    {r.bundleLinked ? `${r.scopeLabel ?? ''} · ${r.template ? TEMPLATE_LABEL[r.template] ?? r.template : ''} · ` : ''}
+                    {targetLabel(r)}
+                    {staleNote(r) && <span data-testid="aa-review-stale" style={{ marginLeft: 6, color: '#f5a524' }}>이전 기준 · {staleNote(r)}</span>}
                   </div>
                   {r.question && <div style={{ fontSize: 12, marginTop: 4, color: 'rgba(255,255,255,0.65)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Q. {r.question}</div>}
                 </button>
@@ -154,7 +156,8 @@ function ReviewPanel({ detail, onAdd }: { detail: ReviewDetail; onAdd: () => voi
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }} data-testid="aa-review-detail">
           <b style={{ fontSize: 15 }}>{detail.source.replace(/^external_ai:/, '외부 AI · ')}</b>
           <span style={muted}>{fmt(detail.createdAt)}</span>
-          <span style={{ ...muted, color: '#c8a96e' }} data-testid="aa-review-basis">기준: Draft rev {detail.target.type === 'draft' ? detail.target.revision : '–'}</span>
+          <span style={{ ...muted, color: '#c8a96e' }} data-testid="aa-review-basis">{targetLabel(detail)}</span>
+          {staleNote(detail) && <span data-testid="aa-review-detail-stale" style={{ fontSize: 11.5, color: '#f5a524', border: '1px solid rgba(245,165,36,0.4)', borderRadius: 4, padding: '1px 6px' }}>이전 기준 · {staleNote(detail)}</span>}
           <span style={{ flex: 1 }} />
           <Button size="sm" variant="primary" onClick={onAdd} data-testid="aa-review-add">답변 추가</Button>
         </div>
@@ -165,6 +168,7 @@ function ReviewPanel({ detail, onAdd }: { detail: ReviewDetail; onAdd: () => voi
         </div>
         {detail.question && <div style={{ marginTop: 8, fontSize: 13 }}>Q. {detail.question}</div>}
         <div role="note" style={{ marginTop: 10, fontSize: 12, color: '#f5a524' }}>AI 의견이며 검증된 결과가 아닙니다. 지적사항 정리는 다음 단계에서 지원합니다.</div>
+        <div style={{ ...muted, marginTop: 6, fontSize: 12 }} data-testid="aa-review-req-record">{requirementsRecordNote(detail)}</div>
         {detail.bundleMd && (
           <div style={{ marginTop: 10 }}>
             <button onClick={() => setShowBundle((v) => !v)} data-testid="aa-review-bundle-toggle" style={{ background: 'none', border: 'none', color: '#c8a96e', cursor: 'pointer', fontSize: 12, padding: 0 }}>

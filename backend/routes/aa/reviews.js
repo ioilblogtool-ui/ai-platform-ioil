@@ -1,4 +1,6 @@
 // 외부 AI 수동 리뷰 (Sprint 5 Step 3 · 05 §5 · REV-M1~M3·M7·REV-13 · Q4·Q7·Q11·Q13).
+// Sprint 6 Step 5: 기준은 Draft revision 또는 발행 버전(Q9). 저장은 RPC aa_create_manual_review_at.
+// 목록·상세는 원래 기준(target)과 지금 기준(current)을 나눠 주고, 낡은 기준이면 staleBasis (REV-M6, Q13).
 // Workbench는 AI API를 호출하지 않는다. 사용자가 외부 AI에서 받은 답변을 기준(번들 또는 현재 Draft)과 함께 저장한다.
 // 저장되는 값은 외부로 나가지 않으므로 차단 규칙(V12, 키·토큰·PEM)만 적용한다. 걸리면 400, 아무것도 저장하지 않는다.
 const express = require('express');
@@ -43,6 +45,35 @@ async function currentRevision(req) {
   return data?.revision ?? null;
 }
 
+/** 지금 기준: 현재 Draft revision + 버전 라벨 목록(최신 먼저) — 목록·상세·검증이 같이 쓴다 */
+async function basisContext(req) {
+  const [revision, versions] = await Promise.all([
+    currentRevision(req),
+    supabase.from('aa_architecture_versions').select('id, label, version_no')
+      .eq('project_id', req.project.id).eq('user_id', req.user.id).order('version_no', { ascending: false }),
+  ]);
+  if (versions.error) throw versions.error;
+  return { revision, versions: new Map(versions.data.map((v) => [v.id, v])), latest: versions.data[0] ?? null };
+}
+
+/** 요청의 기준 → { draftRevision } | { versionId } | { error } */
+function parseBasis(basis, ctx, { field, requireRevision }) {
+  if (basis?.source === 'version') {
+    const id = basis.versionId;
+    if (typeof id !== 'string' || !UUID_RE.test(id) || !ctx.versions.has(id.toLowerCase())) {
+      return { error: { field: `${field}.versionId`, message: '이 프로젝트의 발행 버전이 아닙니다.' } };
+    }
+    return { versionId: id.toLowerCase() };
+  }
+  if (basis === undefined || basis === null || basis.source === 'draft' || (requireRevision && basis.source === undefined)) {
+    if (!requireRevision) return { draftRevision: ctx.revision };        // 번들 미연결 + Draft(기본): 저장 시점 Draft (Q13)
+    const rev = basis?.revision;
+    if (!Number.isInteger(rev) || rev < 1 || rev > ctx.revision) return { error: { field: `${field}.revision`, message: '번들 기준 revision이 올바르지 않습니다.' } };
+    return { draftRevision: rev };
+  }
+  return { error: { field, message: '기준은 { source: "draft" } 또는 { source: "version", versionId }여야 합니다.' } };
+}
+
 async function findReview(req, id) {
   if (!UUID_RE.test(id)) return null;
   const { data, error } = await supabase.from('aa_reviews').select('*')
@@ -55,7 +86,12 @@ function serializeAnswer(a) {
   return { id: a.id, tool: a.tool, answerMd: a.answer_md, followUpOf: a.follow_up_of, followUpQuestion: a.follow_up_question, createdAt: a.created_at };
 }
 
-function serializeReview(r, answers) {
+function serializeReview(r, answers, ctx) {
+  const v = r.version_id ? ctx.versions.get(r.version_id) : null;
+  const current = ctx.latest ? { type: 'version', id: ctx.latest.id, label: ctx.latest.label } : { type: 'draft', revision: ctx.revision };
+  const staleBasis = r.version_id
+    ? Boolean(ctx.latest && ctx.latest.id !== r.version_id)
+    : Number.isInteger(r.draft_revision) && Number.isInteger(ctx.revision) && r.draft_revision < ctx.revision;
   const scope = r.bundle_scope ?? {};
   const tools = [...new Set(answers.map((a) => a.tool))];
   return {
@@ -63,7 +99,8 @@ function serializeReview(r, answers) {
     mode: r.mode,
     source: r.mode === 'api' ? 'api' : `external_ai:${tools[0] ?? ''}`,
     tools,
-    target: r.version_id ? { type: 'version', versionId: r.version_id } : { type: 'draft', revision: r.draft_revision },
+    target: r.version_id ? { type: 'version', versionId: r.version_id, label: v?.label ?? null } : { type: 'draft', revision: r.draft_revision },
+    current: r.version_id ? current : { type: 'draft', revision: ctx.revision },
     bundleLinked: Boolean(r.bundle_id),
     bundleId: r.bundle_id,
     format: scope.format ?? null,
@@ -72,7 +109,9 @@ function serializeReview(r, answers) {
     question: scope.question ?? null,
     status: r.status,
     answerCount: answers.length,
-    staleBasis: false,            // 버전 비교는 Sprint 6 (REV-M6)
+    staleBasis,
+    // Q16: 당시 요구사항을 어디서 볼 수 있나 — 버전 스냅샷 / 번들 원문 / 기록 없음
+    requirementsRecord: r.version_id ? 'version' : r.bundle_id ? 'bundle' : 'none',
     createdAt: r.created_at,
     finishedAt: r.finished_at,
   };
@@ -87,10 +126,11 @@ router.post('/manual', wrap(async (req, res) => {
   const answerProblem = checkAnswer(answer, 'answer.');
   if (answerProblem) return invalid(res, answerProblem.field, answerProblem.message);
 
-  const revisionNow = await currentRevision(req);
-  if (revisionNow === null) return sendError(res, 404, 'NOT_FOUND', 'Draft를 찾을 수 없습니다.');
+  const ctx = await basisContext(req);
+  if (ctx.revision === null) return sendError(res, 404, 'NOT_FOUND', 'Draft를 찾을 수 없습니다.');
 
-  let draftRevision = revisionNow;       // 번들 미연결이면 저장 시점의 현재 Draft (Q13)
+  // 번들 미연결이면 본문 basis(생략 = 저장 시점 현재 Draft, REV-M3·Q13)
+  let parsed = parseBasis(body.basis, ctx, { field: 'basis', requireRevision: false });
   let bundleScope = null, bundleMd = null, bundleId = null;
   if (bundle !== null && bundle !== undefined) {
     if (typeof bundle !== 'object') return invalid(res, 'bundle', 'bundle 형식이 올바르지 않습니다.');
@@ -98,8 +138,7 @@ router.post('/manual', wrap(async (req, res) => {
     if (!BUNDLE_FORMATS.has(bundle.format)) return invalid(res, 'bundle.format', '번들 형식은 ai-md 또는 ai-json이어야 합니다.');
     if (typeof bundle.bundleMd !== 'string' || !bundle.bundleMd.trim()) return invalid(res, 'bundle.bundleMd', '번들 원문이 비어 있습니다.');
     if (bytes(bundle.bundleMd) > LIMITS.bundleBytes) return invalid(res, 'bundle.bundleMd', '번들 원문은 UTF-8 기준 512KiB 이하여야 합니다.');
-    const rev = bundle.basis?.revision;
-    if (!Number.isInteger(rev) || rev < 1 || rev > revisionNow) return invalid(res, 'bundle.basis.revision', '번들 기준 revision이 올바르지 않습니다.');
+    parsed = parseBasis(bundle.basis, ctx, { field: 'bundle.basis', requireRevision: true });
     if (bundle.template !== undefined && !(typeof bundle.template === 'string' && Object.hasOwn(TEMPLATES, bundle.template))) {
       return invalid(res, 'bundle.template', '지원하지 않는 템플릿입니다.');
     }
@@ -112,7 +151,6 @@ router.post('/manual', wrap(async (req, res) => {
     if (bundle.scope !== undefined && (typeof bundle.scope !== 'object' || bundle.scope === null || JSON.stringify(bundle.scope).length > LIMITS.scopeJson)) {
       return invalid(res, 'bundle.scope', '범위 정보가 올바르지 않습니다.');
     }
-    draftRevision = rev;
     bundleId = bundle.bundleId;
     bundleMd = bundle.bundleMd;
     bundleScope = {
@@ -124,15 +162,19 @@ router.post('/manual', wrap(async (req, res) => {
     };
   }
 
+  if (parsed.error) return invalid(res, parsed.error.field, parsed.error.message);
+
   // 저장되는 모든 문자열에 차단 규칙 (Q7: 질문·범위 설명 같은 메타데이터 포함)
   if (blocked(res, { answer: { tool: answer.tool, answerMd: answer.answerMd }, bundle: bundleScope ? { ...bundleScope, bundleMd } : null })) return;
 
-  const { data, error } = await supabase.rpc('aa_create_manual_review', {
-    p_project: req.project.id, p_user: req.user.id, p_draft_revision: draftRevision,
+  const { data, error } = await supabase.rpc('aa_create_manual_review_at', {
+    p_project: req.project.id, p_user: req.user.id,
+    p_draft_revision: parsed.versionId ? null : parsed.draftRevision, p_version: parsed.versionId ?? null,
     p_bundle_id: bundleId, p_bundle_scope: bundleScope, p_bundle_md: bundleMd,
     p_tool: answer.tool.trim(), p_answer_md: answer.answerMd, p_client_request_id: clientRequestId ?? null,
   });
   if (error) throw error;
+  if (data?.status === 'version_not_found') return invalid(res, 'basis.versionId', '이 프로젝트의 발행 버전이 아닙니다.');
   res.status(data.existing ? 200 : 201).json({ data: { id: data.review_id, answerId: data.answer_id, existing: Boolean(data.existing) } });
 }));
 
@@ -201,7 +243,8 @@ router.get('/', wrap(async (req, res) => {
     if (r.error) throw r.error;
     answers = r.data;
   }
-  res.json({ data: reviews.map((rv) => serializeReview(rv, answers.filter((a) => a.review_id === rv.id))), total: count ?? reviews.length });
+  const ctx = await basisContext(req);
+  res.json({ data: reviews.map((rv) => serializeReview(rv, answers.filter((a) => a.review_id === rv.id), ctx)), total: count ?? reviews.length });
 }));
 
 // ── 상세 (번들 원문·답변 포함) ─────────────────────────────────
@@ -214,7 +257,7 @@ router.get('/:reviewId', wrap(async (req, res) => {
   if (error) throw error;
   res.json({
     data: {
-      ...serializeReview(review, answers),
+      ...serializeReview(review, answers, await basisContext(req)),
       bundleMd: review.bundle_md,
       scope: review.bundle_scope?.scope ?? null,
       summary: review.summary,
