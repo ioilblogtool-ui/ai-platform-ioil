@@ -86,7 +86,7 @@ describe('AA requirements and V9', { skip: dbSkipReason }, () => {
     const referenced = await api(A).del(`${ownUrl}?force=true`);
     assert.equal(referenced.status, 409);
     assert.equal(referenced.body.code, 'IN_USE');
-    assert.deepEqual(referenced.body.details, { componentIds: ['cmp_client01'], relationIds: ['rel_a'] });
+    assert.deepEqual(referenced.body.details, { componentIds: ['cmp_client01'], relationIds: ['rel_a'], flowIds: [] });   // Sprint 8: flowIds
 
     // Simulate a deletion occurring between the reference check and Draft write.
     const { error } = await aaDb().from('aa_requirements').delete().eq('id', id).eq('project_id', a.id);

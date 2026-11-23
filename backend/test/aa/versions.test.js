@@ -43,7 +43,8 @@ describe('AA versions', { skip: dbSkipReason }, () => {
     assert.equal(p.suggestedLabel, 'v1.0');
     assert.equal(p.noChanges, false);
     // Sprint 7: 샘플에 배치안 2개 — Logical 4 + 배치안 18 컴포넌트, calls 4 + 배치안 calls 4 + realizes 8
-    assert.deepEqual(p.summary, { hashVersion: 1, first: true, components: 22, relations: 16 });
+    // Sprint 8: PaaS에 사용자 브라우저·web client(+2), web client→backend calls·realizes(+2)
+    assert.deepEqual(p.summary, { hashVersion: 1, first: true, components: 24, relations: 18 });
 
     const res = await publish(id, { label: 'v1.0', note: '첫 버전' });
     assert.equal(res.status, 201, JSON.stringify(res.body));

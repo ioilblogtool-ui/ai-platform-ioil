@@ -1,7 +1,8 @@
 const { UUID_RE } = require('./errors');
 
 function lists(model) {
-  return ['components', 'relations'].flatMap((group) =>
+  // Sprint 8: 흐름의 requirementIds도 같은 규칙(V9 정리·삭제 보호)
+  return ['components', 'relations', 'flows'].flatMap((group) =>
     Object.entries(model?.[group] ?? {}).flatMap(([id, item]) =>
       Array.isArray(item?.requirementIds) ? [{ group, id, item }] : [],
     ),
@@ -9,10 +10,10 @@ function lists(model) {
 }
 
 function references(model, id) {
-  const result = { componentIds: [], relationIds: [] };
+  const result = { componentIds: [], relationIds: [], flowIds: [] };
   for (const entry of lists(model)) {
     if (entry.item.requirementIds.some((value) => typeof value === 'string' && value.toLowerCase() === id)) {
-      result[entry.group === 'components' ? 'componentIds' : 'relationIds'].push(entry.id);
+      result[{ components: 'componentIds', relations: 'relationIds', flows: 'flowIds' }[entry.group]].push(entry.id);
     }
   }
   return result;

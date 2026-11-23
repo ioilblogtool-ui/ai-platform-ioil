@@ -65,7 +65,10 @@ function canonModel(model) {
   const components = Object.values(m.components ?? {}).map(entity).sort(byId);
   const relations = Object.values(m.relations ?? {}).map(entity).sort(byId);
   const out = { schemaVersion: m.schemaVersion ?? 1, components, relations, views };
-  if (!isEmpty(m.flows)) out.flows = m.flows;
+  // Sprint 8: 흐름은 requirementIds만 정렬(참여·결과 순서는 의미 있음). 키 순서는 canonicalJson이 정렬
+  if (!isEmpty(m.flows)) {
+    out.flows = Object.fromEntries(Object.entries(m.flows).map(([k, f]) => [k, f && Array.isArray(f.requirementIds) ? { ...f, requirementIds: [...new Set(f.requirementIds)].sort() } : f]));
+  }
   return out;
 }
 

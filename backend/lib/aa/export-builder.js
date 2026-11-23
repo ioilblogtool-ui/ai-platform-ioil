@@ -5,6 +5,7 @@
 const { normalizeModel } = require('./normalize');
 const { basisText, basisShort, basisJson } = require('./export-basis');
 const { toMermaidFlowchart } = require('./mermaid-export');
+const { flowSequence, flowSummaryLines, AUTH_LABEL, CAUSE_LABEL } = require('./flow-export');
 
 const TEMPLATES = Object.freeze({
   'design-review': '아래 아키텍처를 설계 리뷰해 주세요. 신뢰성·성능·확장성·보안·운영 관점에서 위험과 개선안을 우선순위와 함께 제시해 주세요.',
@@ -33,7 +34,7 @@ function overviewSummary(readmeMd) {
  * 범위를 정규화 결과의 ref 집합으로 바꾼다. 실패하면 { error }.
  * scope: { type:'project' } | { type:'view', viewId } | { type:'components', componentIds } | { type:'requirement', requirementId }
  */
-function resolveScope(n, scope, requirements) {
+function resolveScope(n, scope, requirements, model) {
   const all = new Set(n.components.map((c) => c.ref));
   const byRef = new Map(n.components.map((c) => [c.ref, c]));
   const type = scope?.type ?? 'project';
@@ -64,7 +65,16 @@ function resolveScope(n, scope, requirements) {
     }
     return { refs, label: `요구사항 ${req.code}`, reqCodes: new Set([req.code]), requirementCode: req.code };
   }
-  if (type === 'flow') return { error: 'flow' };
+  if (type === 'flow') {
+    // Sprint 8 (05 §7): 원본(Draft 또는 버전) 모델의 흐름 — 참여 컴포넌트와 그 사이 calls, 흐름의 요구사항
+    const flow = typeof scope.flowId === 'string' ? model?.flows?.[scope.flowId] : null;
+    if (!flow) return { error: 'flow' };
+    const refOf = n.index.componentRefById;
+    const refs = new Set((flow.participantIds ?? []).map((cid) => refOf.get(cid)).filter(Boolean));
+    const codes = (flow.requirementIds ?? []).map((rid) => n.index.requirementCodeById.get(String(rid).toLowerCase())).filter(Boolean);
+    const endpoint = flow.endpoint ? ` (${flow.endpoint.method} ${flow.endpoint.path})` : '';
+    return { refs, label: `API Flow: ${flow.name}${endpoint}`, reqCodes: new Set(codes), flow, flowReqCodes: codes };
+  }
   return { error: 'scope' };
 }
 
@@ -80,13 +90,14 @@ function buildAskAi({ project, model, revision, basis, requirements = [], format
   if (template === 'custom' && !q) return { error: 'question' };
 
   const n = normalizeModel(model, { requirements, withIndex: true });
-  const resolved = resolveScope(n, scope, requirements);
+  const resolved = resolveScope(n, scope, requirements, model);
   if (resolved.error) return { error: `scope_${resolved.error}` };
 
   // 범위 안 컴포넌트·관계·그룹, 번들 별칭
   const comps = n.components.filter((c) => resolved.refs.has(c.ref));
   const alias = new Map(comps.map((c, i) => [c.ref, `C${i + 1}`]));
-  const rels = n.relations.filter((r) => alias.has(r.from) && alias.has(r.to));
+  // 흐름 범위는 참여끼리의 calls만 (Sprint 8)
+  const rels = n.relations.filter((r) => alias.has(r.from) && alias.has(r.to) && (!resolved.flow || r.type === 'calls'));
   const usedGroups = new Set(comps.map((c) => c.groupRef).filter(Boolean));
   // 그룹은 쓰이는 그룹과 그 상위 그룹까지
   for (const g of [...usedGroups]) {
@@ -112,7 +123,22 @@ function buildAskAi({ project, model, revision, basis, requirements = [], format
   }));
   const outRelations = rels.map((r) => ({
     from: alias.get(r.from), to: alias.get(r.to), protocol: r.protocol, mode: r.mode, label: r.label, requirements: r.requirementCodes,
+    ...(r.ops ? { operations: r.ops } : {}),   // Sprint 8: 있을 때만
   }));
+  // Sprint 8: 흐름 범위 — 참여는 번들 별칭(C1…)으로, 내부 id(cmp_·flw_·out_) 없음
+  const refOf = n.index.componentRefById;
+  const aliasOfCid = (cid) => alias.get(refOf.get(cid)) ?? '?';
+  const nameOfCid = (cid) => { const c = n.components.find((x) => x.ref === refOf.get(cid)); return c ? c.name : '(삭제된 컴포넌트)'; };
+  const flowOut = resolved.flow ? {
+    name: resolved.flow.name,
+    endpoint: resolved.flow.endpoint ? `${resolved.flow.endpoint.method} ${resolved.flow.endpoint.path}` : null,
+    description: resolved.flow.description ?? null,
+    participants: (resolved.flow.participantIds ?? []).map((cid) => aliasOfCid(cid)),
+    outcomes: (resolved.flow.outcomes ?? []).map((o) => ({ kind: o.kind, label: o.label, cause: o.cause ? CAUSE_LABEL[o.cause] ?? o.cause : null })),
+    auth: Object.fromEntries(Object.keys(AUTH_LABEL).filter((r) => resolved.flow.auth?.[r]).map((r) => [r, aliasOfCid(resolved.flow.auth[r])])),
+    requirements: resolved.flowReqCodes,
+    sequence: flowSequence(resolved.flow, model, { idFor: (cid) => aliasOfCid(cid), nameFor: (cid) => `${aliasOfCid(cid)} ${nameOfCid(cid)}` }).source,
+  } : null;
   const outGroups = groups.map((g) => ({ alias: galias.get(g.ref), label: g.label, parent: g.parent ? galias.get(g.parent) ?? null : null }));
 
   if (format === 'ai-json') {
@@ -125,6 +151,7 @@ function buildAskAi({ project, model, revision, basis, requirements = [], format
       project: { name: project.name, summary: overviewSummary(project.readmeMd) || null },
       requirements: reqs.map((r) => ({ code: r.code, kind: KIND_LABEL[r.kind] ?? r.kind, title: r.title, target: r.target, metric: r.metric })),
       components: outComponents, relations: outRelations, groups: outGroups, omitted,
+      ...(flowOut ? { flow: flowOut } : {}),
     };
     const full = { bundleId, readAt, ...stable };
     return {
@@ -144,6 +171,11 @@ function buildAskAi({ project, model, revision, basis, requirements = [], format
   if (templateText) body.push(templateText, '');
   if (q) body.push(q, '');
   body.push('# 프로젝트', '', `${project.name}${overviewSummary(project.readmeMd) ? ` — ${overviewSummary(project.readmeMd)}` : ''}`, '');
+  if (flowOut) {
+    body.push(`# API Flow: ${flowOut.name}${flowOut.endpoint ? ` (${flowOut.endpoint})` : ''}`, '');
+    body.push(...flowSummaryLines(resolved.flow, { nameFor: (cid) => `${aliasOfCid(cid)} ${nameOfCid(cid)}`, reqCodes: flowOut.requirements }), '');
+    body.push('```mermaid', flowOut.sequence, '```', '');
+  }
   body.push('# 요구사항', '');
   if (reqs.length) {
     body.push('| 코드 | 종류 | 제목 | 목표 | 측정 |', '|---|---|---|---|---|');
@@ -163,7 +195,7 @@ function buildAskAi({ project, model, revision, basis, requirements = [], format
   body.push('', '# 관계', '');
   if (outRelations.length) {
     for (const r of outRelations) {
-      const parts = [r.protocol, r.mode === 'async' ? '비동기' : r.mode === 'sync' ? '동기' : null, r.label].filter(Boolean);
+      const parts = [r.protocol, r.mode === 'async' ? '비동기' : r.mode === 'sync' ? '동기' : null, r.label, r.operations].filter(Boolean);
       body.push(`- ${r.from} → ${r.to}${parts.length ? ` · ${parts.join(' · ')}` : ''}${r.requirements.length ? ` (${r.requirements.join(', ')})` : ''}`);
     }
   } else {

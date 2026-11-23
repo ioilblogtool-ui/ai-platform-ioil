@@ -5,6 +5,7 @@ const { normalizeModel } = require('./normalize');
 const { basisText, basisFileTag } = require('./export-basis');
 const { toMermaidFlowchart } = require('./mermaid-export');
 const { deploymentSectionLines, strategySectionLines } = require('./deployment-export');
+const { flowSequence, flowSummaryLines } = require('./flow-export');
 
 // Sprint 7: deployment(배치안 구성도·구현 대상)·deployStrategy(배포 전략)는 기본 꺼짐, 배치안이 없으면 내용 없음
 const DEFAULT_SECTIONS = Object.freeze({ overview: true, logicalDiagram: true, nfr: true, deployment: false, deployStrategy: false });
@@ -13,7 +14,10 @@ const SECTION_KEYS = Object.keys(DEFAULT_SECTIONS);
 /** 요청의 sections → 정해진 키만 남긴 boolean 객체 (그 밖의 키는 무시, 없는 키는 기본값) */
 function normalizeSections(input) {
   const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-  return Object.fromEntries(SECTION_KEYS.map((k) => [k, src[k] === undefined ? DEFAULT_SECTIONS[k] : src[k] === true]));
+  const out = Object.fromEntries(SECTION_KEYS.map((k) => [k, src[k] === undefined ? DEFAULT_SECTIONS[k] : src[k] === true]));
+  // Sprint 8 (05 §7.6): apiFlows = 고른 흐름 id 배열. 비었거나 없으면 구역 없음 (기존 응답 모양을 바꾸지 않게 있을 때만)
+  if (Array.isArray(src.apiFlows) && src.apiFlows.length) out.apiFlows = [...new Set(src.apiFlows.filter((x) => typeof x === 'string'))];
+  return out;
 }
 
 // Markdown 표 칸: 줄바꿈·파이프가 표를 깨지 않게 한다
@@ -43,7 +47,7 @@ const CATEGORY_LABEL = {
 function buildReadme({ project, model, revision, basis, requirements = [], sections }) {
   const b = basis ?? { source: 'draft', revision };   // Sprint 6: 버전 기준이면 { source: 'version', label, publishedAt }
   const on = normalizeSections(sections);
-  const n = normalizeModel(model, { requirements });
+  const n = normalizeModel(model, { requirements, withIndex: true });
   const out = [];
 
   // ① 제목·기준 (시각은 넣지 않는다 — 꼬리말에만)
@@ -73,9 +77,11 @@ function buildReadme({ project, model, revision, basis, requirements = [], secti
     out.push('_아직 컴포넌트가 없습니다._', '');
   }
   if (n.relations.length) {
-    out.push('| 호출하는 쪽 | 호출받는 쪽 | 프로토콜 | 방식 | 설명 |', '|---|---|---|---|---|');
+    // Sprint 8: 운영·보안 속성이 하나라도 있을 때만 열을 더한다 (없으면 Sprint 7과 같은 표)
+    const withOps = n.relations.some((r) => r.ops);
+    out.push(`| 호출하는 쪽 | 호출받는 쪽 | 프로토콜 | 방식 | 설명 |${withOps ? ' 운영·보안 |' : ''}`, `|---|---|---|---|---|${withOps ? '---|' : ''}`);
     for (const r of n.relations) {
-      out.push(`| ${cell(r.fromName)} | ${cell(r.toName)} | ${cell(r.protocol)} | ${cell(r.mode === 'async' ? '비동기' : r.mode === 'sync' ? '동기' : null)} | ${cell(r.label)} |`);
+      out.push(`| ${cell(r.fromName)} | ${cell(r.toName)} | ${cell(r.protocol)} | ${cell(r.mode === 'async' ? '비동기' : r.mode === 'sync' ? '동기' : null)} | ${cell(r.label)} |${withOps ? ` ${cell(r.ops)} |` : ''}`);
     }
     out.push('');
   }
@@ -90,13 +96,17 @@ function buildReadme({ project, model, revision, basis, requirements = [], secti
   // ⑤ 배포 구성 (Sprint 7, 선택) — 배치안별 구성도·구현 대상
   if (on.deployment) out.push(...deploymentSectionLines(model));
 
-  // ⑦ 설계 근거 — 이번 단계는 NFR 목표·측정 방법만 (ADR은 Phase 3)
+  // ⑥ API·외부 연동 (Sprint 8, 선택 — sections.apiFlows로 고른 흐름만)
+  if (on.apiFlows?.length) out.push(...apiFlowLines(model, on.apiFlows, n));
+
+  // ⑦ 설계 근거 — NFR 목표·측정 방법 (+ Sprint 8 측정 기준: Draft 기준이고 하나라도 있을 때만) (ADR은 Phase 3)
   if (on.nfr) {
     out.push('## 비기능 요구사항 (NFR)', '');
     if (n.requirements.nfr.length) {
-      out.push('| 코드 | 제목 | 분류 | 목표 | 측정 방법 |', '|---|---|---|---|---|');
+      const withMeasure = n.requirements.nfr.some((r) => r.measurement);
+      out.push(`| 코드 | 제목 | 분류 | 목표 | 측정 방법 |${withMeasure ? ' 측정 기준 |' : ''}`, `|---|---|---|---|---|${withMeasure ? '---|' : ''}`);
       for (const r of n.requirements.nfr) {
-        out.push(`| ${cell(r.code)} | ${cell(r.title)} | ${cell(CATEGORY_LABEL[r.category] ?? r.category)} | ${cell(r.target)} | ${cell(r.metric)} |`);
+        out.push(`| ${cell(r.code)} | ${cell(r.title)} | ${cell(CATEGORY_LABEL[r.category] ?? r.category)} | ${cell(r.target)} | ${cell(r.metric)} |${withMeasure ? ` ${cell(measureText(r.measurement, model))} |` : ''}`);
       }
       out.push('');
     } else {
@@ -112,6 +122,31 @@ function buildReadme({ project, model, revision, basis, requirements = [], secti
     filename: `README_${slugify(project.name)}_${basisFileTag(b)}.md`,
     sections: on,
   };
+}
+
+function measureText(m, model) {
+  if (!m) return null;
+  const flow = m.flowId ? model?.flows?.[m.flowId]?.name ?? '(흐름 없음)' : null;
+  return [flow ? `대상 ${flow}` : null, m.endpoint, m.environment, m.load, m.method].filter(Boolean).join(' · ');
+}
+
+/** Sprint 8: ⑥ API·외부 연동 — 흐름마다 요약 + sequenceDiagram(참여는 P1… + 이름, 내부 id 없음) */
+function apiFlowLines(model, ids, n) {
+  const out = ['## API·외부 연동 (API Flow)', ''];
+  const codeOf = new Map((n.requirements.nfr.concat(n.requirements.fr)).map((r) => [r.code, r.code]));
+  const reqCode = (id) => n.index?.requirementCodeById?.get(String(id).toLowerCase());
+  for (const id of ids) {
+    const flow = model?.flows?.[id];
+    if (!flow) continue;
+    const nameFor = (cid) => model.components?.[cid]?.name ?? '(삭제된 컴포넌트)';
+    const reqCodes = (flow.requirementIds ?? []).map((rid) => reqCode(rid)).filter((c) => c && codeOf.has(c));
+    out.push(`### ${String(flow.name).replace(/\r?\n/g, ' ')}`, '');
+    out.push(...flowSummaryLines(flow, { nameFor, reqCodes }), '');
+    const { source, unknown } = flowSequence(flow, model, { idFor: (_cid, i) => `P${i + 1}` });
+    if (unknown) out.push(`> ⚠ 본문에 참여 목록 밖 식별자 ${unknown}개가 있어 "(알 수 없는 참여자)"로 표시했습니다.`, '');
+    out.push('```mermaid', source, '```', '');
+  }
+  return out;
 }
 
 /** 생성 시각 꼬리말. 출력 해시(contentHash)에는 포함하지 않는다 */

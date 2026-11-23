@@ -29,6 +29,8 @@ const REQUIREMENTS = Object.freeze([
     title: '리포트 조회 응답 시간', target: 'p95 < 300ms', metric: '업무 시간대 Reports API 응답 시간 p95',
     description: '월별 리포트 조회 API는 업무 시간대 부하에서도 p95 300ms 안에 응답한다.',
     components: ['cmp_reports_api'],
+    // Sprint 8 (REQ-06·P2-5): 측정 기준 — 대상 흐름은 샘플의 리포트 목록 조회
+    measurement: { flowId: 'flw_reportlist', endpoint: 'GET /api/my-ai/reports', environment: 'staging', load: '동시 20명 · 5분', method: 'k6 http_req_duration p95' },
   },
   {
     key: 'nfr_db_availability', kind: 'nfr', category: 'availability', priority: 'should',
@@ -56,14 +58,15 @@ function model(links = {}) {
     cmp_reports_db: c('cmp_reports_db', 'database', 'Reports DB', 'PostgreSQL', { engine: 'postgres' }),
     cmp_auth: c('cmp_auth', 'external', 'Auth', 'Supabase Auth'),
   };
-  const r = (id, from, to, protocol, label) => ({
-    id, type: 'calls', from, to, protocol, mode: 'sync', requirementIds: [], ...(label ? { label } : {}),
+  // Sprint 8 (P2-1): 관계마다 운영·보안 속성. 자격증명은 유형만(값 없음)
+  const r = (id, from, to, protocol, label, attrs = {}) => ({
+    id, type: 'calls', from, to, protocol, mode: 'sync', requirementIds: [], ...(label ? { label } : {}), ...attrs,
   });
   m.relations = {
-    rel_web_api: r('rel_web_api', 'cmp_web_app', 'cmp_reports_api', 'HTTPS'),
-    rel_api_db: r('rel_api_db', 'cmp_reports_api', 'cmp_reports_db', 'JDBC'),
-    rel_web_auth: r('rel_web_auth', 'cmp_web_app', 'cmp_auth', 'HTTPS', '로그인·토큰 발급'),
-    rel_api_auth: r('rel_api_auth', 'cmp_reports_api', 'cmp_auth', 'HTTPS', '토큰 검증'),
+    rel_web_api: r('rel_web_api', 'cmp_web_app', 'cmp_reports_api', 'HTTPS', null, { timeoutMs: 3000, onFailure: 'propagate', credential: 'jwt-bearer', dataClass: 'personal' }),
+    rel_api_db: r('rel_api_db', 'cmp_reports_api', 'cmp_reports_db', 'JDBC', null, { timeoutMs: 2000, retry: { max: 1, backoff: 'fixed' }, onFailure: 'propagate', credential: 'service-role', dataClass: 'personal' }),
+    rel_web_auth: r('rel_web_auth', 'cmp_web_app', 'cmp_auth', 'HTTPS', '로그인·토큰 발급', { credential: 'none', dataClass: 'sensitive' }),
+    rel_api_auth: r('rel_api_auth', 'cmp_reports_api', 'cmp_auth', 'HTTPS', '토큰 검증', { timeoutMs: 2000, credential: 'jwt-bearer', dataClass: 'internal' }),
   };
   m.views[0].nodes = [
     { id: 'nd_backend', kind: 'group', label: 'Backend', position: { x: 320, y: 48 }, width: 528, height: 192 },
@@ -74,6 +77,7 @@ function model(links = {}) {
   ];
   m.views[0].edges = Object.keys(m.relations).map((relationId) => ({ id: `ed_${relationId.slice(4)}`, relationId }));
   addDeploymentViews(m);
+  addFlows(m, links);
   for (const req of REQUIREMENTS) {
     const id = links[req.key];
     if (!id) continue;
@@ -125,18 +129,65 @@ const VM_STRATEGY = [
   '',
 ].join('\n');
 
+/**
+ * API Flow (Sprint 8 · P2-4): 리포트 목록 조회. 본문의 participant id는 componentId (03 §2.2 Mermaid 저장 계약).
+ * 순서: 로그인·JWT 발급(Auth) → Bearer 요청 → Reports API가 Auth에 토큰 검증 → 유효하면 service_role로 DB 조회(user_id 필터) → 200, 아니면 401
+ */
+const REPORTS_FLOW_MERMAID = [
+  'sequenceDiagram',
+  '  participant cmp_web_app',
+  '  participant cmp_auth',
+  '  participant cmp_reports_api',
+  '  participant cmp_reports_db',
+  '  cmp_web_app->>cmp_auth: 로그인 (이메일·비밀번호)',
+  '  cmp_auth-->>cmp_web_app: JWT 발급 (access token)',
+  '  cmp_web_app->>cmp_reports_api: GET /api/my-ai/reports + Authorization: Bearer',
+  '  cmp_reports_api->>cmp_auth: 토큰 검증 (getUser)',
+  '  alt 유효한 토큰',
+  '    cmp_auth-->>cmp_reports_api: 사용자 확인 (user_id)',
+  '    cmp_reports_api->>cmp_reports_db: select … where user_id = 요청 사용자 (service_role)',
+  '    cmp_reports_db-->>cmp_reports_api: 리포트 목록',
+  '    cmp_reports_api-->>cmp_web_app: 200 OK + reports',
+  '  else 만료·위조 토큰',
+  '    cmp_auth-->>cmp_reports_api: 검증 실패',
+  '    cmp_reports_api-->>cmp_web_app: 401 Unauthorized',
+  '  end',
+].join('\n');
+
+function addFlows(m, links) {
+  m.flows = {
+    flw_reportlist: {
+      id: 'flw_reportlist',
+      name: '리포트 목록 조회',
+      endpoint: { method: 'GET', path: '/api/my-ai/reports' },
+      description: '로그인한 사용자가 자기 월별 리포트 목록을 본다. 토큰은 Auth가 발급하고 Reports API가 검증하며, DB는 Reports API가 service_role로 접근하되 user_id로 거른다.',
+      participantIds: ['cmp_web_app', 'cmp_auth', 'cmp_reports_api', 'cmp_reports_db'],
+      outcomes: [
+        { id: 'out_ok2000', kind: 'success', label: '200 OK' },
+        { id: 'out_un4010', kind: 'failure', label: '401 Unauthorized', cause: 'auth' },
+      ],
+      requirementIds: [links.nfr_latency, links.fr_monthly_report].filter(Boolean),
+      auth: { tokenIssuer: 'cmp_auth', tokenVerifier: 'cmp_reports_api', dataAccessor: 'cmp_reports_api' },
+      mermaid: REPORTS_FLOW_MERMAID,
+    },
+  };
+}
+
 /** 배치안 2개 (Sprint 7 Q8). Logical 컴포넌트는 공유하고, 배치안마다 자기 deployment 컴포넌트를 갖는다 */
 function addDeploymentViews(m) {
   const d = (id, type, name, technology, properties = {}) => ({
     id, type, layer: 'deployment', name, ...(technology ? { technology } : {}), properties, requirementIds: [], decisionIds: [],
   });
-  const calls = (id, from, to, protocol) => ({ id, type: 'calls', from, to, protocol, mode: 'sync', requirementIds: [] });
+  const calls = (id, from, to, protocol, attrs = {}) => ({ id, type: 'calls', from, to, protocol, mode: 'sync', requirementIds: [], ...attrs });
   const realizes = (id, from, to) => ({ id, type: 'realizes', from, to, requirementIds: [] });
   Object.assign(m.components, {
     // 현재 · PaaS
     cmp_paas_ext: d('cmp_paas_ext', 'dep.zone', 'external', null, { trust: 'external' }),
     cmp_paas_int: d('cmp_paas_int', 'dep.zone', 'internal', null, { trust: 'internal' }),
     cmp_paas_data: d('cmp_paas_data', 'dep.zone', 'data', null, { trust: 'data' }),
+    // Sprint 8 (P2-6): 브라우저도 실행 플랫폼 — 외부 구역에서 backend를 직접 호출하는 선으로 경계 통과를 보여준다
+    cmp_paas_browser: d('cmp_paas_browser', 'dep.platform', '사용자 브라우저', null, { provider: '사용자 기기' }),
+    cmp_paas_web_client: d('cmp_paas_web_client', 'dep.process', 'web client', 'Next.js (브라우저)', { instances: 1 }),
     cmp_paas_vercel: d('cmp_paas_vercel', 'dep.platform', 'Vercel', null, { provider: 'Vercel' }),
     cmp_paas_railway: d('cmp_paas_railway', 'dep.platform', 'Railway', null, { provider: 'Railway' }),
     cmp_paas_frontend: d('cmp_paas_frontend', 'dep.process', 'frontend (next)', 'Next.js', { runtime: 'Node.js 24', instances: 1 }),
@@ -155,8 +206,10 @@ function addDeploymentViews(m) {
     cmp_vm_auth: d('cmp_vm_auth', 'dep.managed_auth', 'Supabase Auth', null, { provider: 'Supabase Auth' }),
   });
   Object.assign(m.relations, {
+    rel_paas_web_be: calls('rel_paas_web_be', 'cmp_paas_web_client', 'cmp_paas_backend', 'HTTPS', { credential: 'jwt-bearer', dataClass: 'personal' }),
     rel_paas_fe_be: calls('rel_paas_fe_be', 'cmp_paas_frontend', 'cmp_paas_backend', 'HTTPS'),
-    rel_paas_be_db: calls('rel_paas_be_db', 'cmp_paas_backend', 'cmp_paas_db', 'JDBC'),
+    rel_paas_be_db: calls('rel_paas_be_db', 'cmp_paas_backend', 'cmp_paas_db', 'JDBC', { credential: 'service-role', dataClass: 'personal' }),
+    rel_rz_paas_web: realizes('rel_rz_paas_web', 'cmp_paas_web_client', 'cmp_web_app'),
     rel_vm_lb_1: calls('rel_vm_lb_1', 'cmp_vm_lb', 'cmp_vm_api_1', 'HTTP'),
     rel_vm_lb_2: calls('rel_vm_lb_2', 'cmp_vm_lb', 'cmp_vm_api_2', 'HTTP'),
     rel_rz_paas_fe: realizes('rel_rz_paas_fe', 'cmp_paas_frontend', 'cmp_web_app'),
@@ -173,8 +226,9 @@ function addDeploymentViews(m) {
   m.views.push({
     id: 'view_dep_paas', kind: 'deployment', name: 'Deployment', variant: '현재 · PaaS', strategyMd: PAAS_STRATEGY,
     nodes: [
-      box('nd_paas_ext', 'cmp_paas_ext', 0, 0, 220, 320),
-      { id: 'nd_paas_browser', kind: 'note', text: 'Browser (사용자)', position: { x: 24, y: 120 }, parentId: 'nd_paas_ext' },
+      box('nd_paas_ext', 'cmp_paas_ext', -20, 0, 240, 320),
+      box('nd_paas_browser', 'cmp_paas_browser', 16, 48, 208, 150, 'nd_paas_ext'),
+      node('nd_paas_web_client', 'cmp_paas_web_client', 20, 60, 'nd_paas_browser'),
       box('nd_paas_int', 'cmp_paas_int', 260, 0, 600, 320),
       box('nd_paas_vercel', 'cmp_paas_vercel', 24, 48, 260, 150, 'nd_paas_int'),
       node('nd_paas_frontend', 'cmp_paas_frontend', 40, 60, 'nd_paas_vercel'),
@@ -185,6 +239,7 @@ function addDeploymentViews(m) {
       node('nd_paas_auth', 'cmp_paas_auth', 40, 180, 'nd_paas_data'),
     ],
     edges: [
+      { id: 'ed_paas_web_be', relationId: 'rel_paas_web_be' },
       { id: 'ed_paas_fe_be', relationId: 'rel_paas_fe_be' },
       { id: 'ed_paas_be_db', relationId: 'rel_paas_be_db' },
     ],

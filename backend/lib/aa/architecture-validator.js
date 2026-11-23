@@ -1,5 +1,5 @@
 // 아키텍처 모델 저장 전 검증 (03 데이터 모델 §2.2)
-// V1~V6, V7(경고), V8, V11(경고), V12, V13.
+// V1~V6, V7(경고), V8, V11(경고), V12, V13. Sprint 8: calls 운영·보안 속성(V2), API Flow(V10·V14).
 // Sprint 7: realizes 규칙(V2), 컨테이너 컴포넌트 부모(V5), Deployment View 한도(V13).
 // V6: 타입 레지스트리(type-registry.json — /api/aa/meta/types와 같은 원본) 기준 컴포넌트 타입·속성 검증.
 //     모든 속성은 선택 항목이다. 있는 키만 검사하고, 기본값을 채우거나 값을 바꾸지 않는다 (Sprint 1 저장본 호환).
@@ -34,6 +34,106 @@ const LIST_MAX_ITEMS = 50;
 const MAX_DEPLOYMENT_VIEWS = 5;
 const VARIANT_MAX = 60;
 const STRATEGY_MAX_BYTES = 64 * 1024;
+
+// Sprint 8 (REL-05·06): calls 운영·보안 속성. 수치는 Sprint 8에서 정한 제한 (03 §2.2)
+const TIMEOUT_MAX_MS = 600000;
+const RETRY_MAX = 10;
+const RELATION_ATTRS = ['timeoutMs', 'retry', 'onFailure', 'credential', 'dataClass'];
+const BACKOFFS = new Set(['none', 'fixed', 'exponential']);
+const ON_FAILURE = new Set(['propagate', 'fallback', 'queue_retry', 'ignore']);
+const CREDENTIALS = new Set(['none', 'session-cookie', 'jwt-bearer', 'api-key', 'service-role', 'mtls']);
+const DATA_CLASSES = new Set(['public', 'internal', 'personal', 'sensitive']);
+
+function checkRelationAttrs(r, p, err) {
+  const present = RELATION_ATTRS.filter((k) => r[k] !== undefined);
+  if (r.type !== 'calls') {
+    for (const k of present) err('V2', `${p}.${k}`, `${k}는 calls 관계에만 둘 수 있습니다.`);
+    return;
+  }
+  if (r.timeoutMs !== undefined && !(Number.isInteger(r.timeoutMs) && r.timeoutMs >= 1 && r.timeoutMs <= TIMEOUT_MAX_MS)) {
+    err('V2', `${p}.timeoutMs`, `timeout은 1~${TIMEOUT_MAX_MS}ms 정수여야 합니다.`);
+  }
+  if (r.retry !== undefined) {
+    const ok = isObj(r.retry) && Object.keys(r.retry).every((k) => k === 'max' || k === 'backoff')
+      && Number.isInteger(r.retry.max) && r.retry.max >= 0 && r.retry.max <= RETRY_MAX && BACKOFFS.has(r.retry.backoff);
+    if (!ok) err('V2', `${p}.retry`, `retry는 { max: 0~${RETRY_MAX} 정수, backoff: none|fixed|exponential }여야 합니다.`);
+  }
+  if (r.onFailure !== undefined && !ON_FAILURE.has(r.onFailure)) err('V2', `${p}.onFailure`, `실패 시 동작은 ${[...ON_FAILURE].join('/')} 중 하나여야 합니다.`);
+  if (r.credential !== undefined && !CREDENTIALS.has(r.credential)) err('V2', `${p}.credential`, `자격증명 유형은 ${[...CREDENTIALS].join('/')} 중 하나여야 합니다.`);
+  if (r.dataClass !== undefined && !DATA_CLASSES.has(r.dataClass)) err('V2', `${p}.dataClass`, `데이터 등급은 ${[...DATA_CLASSES].join('/')} 중 하나여야 합니다.`);
+}
+
+// Sprint 8 (V14): API Flow 구조·한도 — Sprint 8에서 정한 제한 (03 §2.2)
+const FLOW_LIMITS = { flows: 30, name: 80, description: 2000, path: 200, participantsMin: 2, participantsMax: 12, outcomesMax: 10, outcomeLabel: 60, mermaidBytes: 32 * 1024 };
+const FLOW_ID_RE = /^flw_[A-Za-z0-9]{10}$/;
+const OUTCOME_ID_RE = /^out_[A-Za-z0-9]{6}$/;
+const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+const OUTCOME_KINDS = new Set(['success', 'failure']);
+const OUTCOME_CAUSES = new Set(['auth', 'validation', 'timeout', 'dependency_down', 'queue_retry', 'other']);
+const AUTH_ROLES = ['tokenIssuer', 'tokenVerifier', 'dataAccessor'];
+const FLOW_KEYS = new Set(['id', 'name', 'endpoint', 'description', 'participantIds', 'outcomes', 'requirementIds', 'auth', 'mermaid']);
+
+function checkFlows(flows, components, err) {
+  const entries = Object.entries(flows);
+  if (entries.length > FLOW_LIMITS.flows) err('V14', 'flows', `흐름은 최대 ${FLOW_LIMITS.flows}개입니다.`);
+  for (const [key, f] of entries) {
+    const p = `flows.${key}`;
+    if (!isObj(f)) { err('V14', p, '흐름은 객체여야 합니다.'); continue; }
+    if (!FLOW_ID_RE.test(key) || f.id !== key) err('V14', `${p}.id`, '흐름 id는 flw_+영숫자 10자이고 키와 같아야 합니다.');
+    for (const k of Object.keys(f)) if (!FLOW_KEYS.has(k)) err('V14', `${p}.${k}`, `알 수 없는 흐름 속성입니다: ${k}`);
+    const name = typeof f.name === 'string' ? f.name.trim() : '';
+    if (!name || name.length > FLOW_LIMITS.name) err('V14', `${p}.name`, `흐름 이름은 1~${FLOW_LIMITS.name}자여야 합니다.`);
+    if (f.description !== undefined && (typeof f.description !== 'string' || f.description.length > FLOW_LIMITS.description)) {
+      err('V14', `${p}.description`, `설명은 ${FLOW_LIMITS.description}자 이하 문자열이어야 합니다.`);
+    }
+    if (f.endpoint !== undefined) {
+      const e = f.endpoint;
+      const ok = isObj(e) && HTTP_METHODS.has(e.method) && typeof e.path === 'string' && e.path.startsWith('/') && !/\s/.test(e.path)
+        && e.path.length <= FLOW_LIMITS.path && Object.keys(e).every((k) => k === 'method' || k === 'path');
+      if (!ok) err('V14', `${p}.endpoint`, `엔드포인트는 { method: GET|POST|PUT|PATCH|DELETE, path: '/…'(공백 없음, ${FLOW_LIMITS.path}자 이하) }여야 합니다.`);
+    }
+    // V10: 참여·역할은 있는 Logical 컴포넌트, 역할은 참여 안, 참여 중복 없음
+    const parts = Array.isArray(f.participantIds) ? f.participantIds : null;
+    if (!parts) err('V14', `${p}.participantIds`, '참여 컴포넌트는 배열이어야 합니다.');
+    else {
+      if (parts.length < FLOW_LIMITS.participantsMin || parts.length > FLOW_LIMITS.participantsMax) {
+        err('V14', `${p}.participantIds`, `참여 컴포넌트는 ${FLOW_LIMITS.participantsMin}~${FLOW_LIMITS.participantsMax}개여야 합니다.`);
+      }
+      if (new Set(parts).size !== parts.length) err('V10', `${p}.participantIds`, '참여 컴포넌트가 겹칩니다.');
+      parts.forEach((cid, i) => {
+        const c = typeof cid === 'string' && Object.prototype.hasOwnProperty.call(components, cid) ? components[cid] : null;
+        if (!c) err('V10', `${p}.participantIds[${i}]`, `존재하지 않는 컴포넌트입니다: ${cid}`);
+        else if (c.layer !== 'logical') err('V10', `${p}.participantIds[${i}]`, '흐름 참여는 Logical 컴포넌트만 가능합니다.');
+      });
+    }
+    if (f.auth !== undefined) {
+      if (!isObj(f.auth)) err('V14', `${p}.auth`, 'auth는 객체여야 합니다.');
+      else for (const [role, cid] of Object.entries(f.auth)) {
+        if (!AUTH_ROLES.includes(role)) { err('V14', `${p}.auth.${role}`, `알 수 없는 인증 역할입니다: ${role}`); continue; }
+        if (!parts || !parts.includes(cid)) err('V10', `${p}.auth.${role}`, '인증 역할은 참여 컴포넌트 중 하나여야 합니다.');
+      }
+    }
+    const outs = Array.isArray(f.outcomes) ? f.outcomes : null;
+    if (!outs || outs.length < 1 || outs.length > FLOW_LIMITS.outcomesMax) err('V14', `${p}.outcomes`, `결과 분기는 1~${FLOW_LIMITS.outcomesMax}개여야 합니다.`);
+    else {
+      const ids = new Set();
+      outs.forEach((o, i) => {
+        const op = `${p}.outcomes[${i}]`;
+        if (!isObj(o)) { err('V14', op, '결과는 객체여야 합니다.'); return; }
+        if (!OUTCOME_ID_RE.test(String(o.id)) || ids.has(o.id)) err('V14', `${op}.id`, '결과 id는 out_+영숫자 6자이고 흐름 안에서 유일해야 합니다.');
+        ids.add(o.id);
+        if (!OUTCOME_KINDS.has(o.kind)) err('V14', `${op}.kind`, '결과 종류는 success 또는 failure여야 합니다.');
+        const label = typeof o.label === 'string' ? o.label.trim() : '';
+        if (!label || label.length > FLOW_LIMITS.outcomeLabel) err('V14', `${op}.label`, `결과 라벨은 1~${FLOW_LIMITS.outcomeLabel}자여야 합니다.`);
+        if (o.cause !== undefined && !OUTCOME_CAUSES.has(o.cause)) err('V14', `${op}.cause`, `원인은 ${[...OUTCOME_CAUSES].join('/')} 중 하나여야 합니다.`);
+      });
+      if (!outs.some((o) => isObj(o) && o.kind === 'success')) err('V14', `${p}.outcomes`, '성공 결과가 하나 이상 있어야 합니다.');
+    }
+    checkRequirementIds(f, p, err);
+    if (typeof f.mermaid !== 'string') err('V14', `${p}.mermaid`, 'mermaid는 문자열이어야 합니다.');
+    else if (Buffer.byteLength(f.mermaid, 'utf8') > FLOW_LIMITS.mermaidBytes) err('V14', `${p}.mermaid`, 'Mermaid 본문은 UTF-8 32KB 이하여야 합니다.');
+  }
+}
 
 const typeDef = (type) => (typeof type === 'string' && Object.prototype.hasOwnProperty.call(REGISTRY.types, type) ? REGISTRY.types[type] : null);
 
@@ -167,6 +267,8 @@ function validateModel(model) {
     if (!RELATION_TYPES.has(r.type)) err('V2', `${p}.type`, `지원하지 않는 관계 유형입니다: ${r.type}`);
     if (!Object.prototype.hasOwnProperty.call(components, r.from)) err('V2', `${p}.from`, `존재하지 않는 컴포넌트입니다: ${r.from}`);
     if (!Object.prototype.hasOwnProperty.call(components, r.to)) err('V2', `${p}.to`, `존재하지 않는 컴포넌트입니다: ${r.to}`);
+    // Sprint 8 (REL-05·06, D-26): calls 운영·보안 속성 — 모두 선택, calls에만
+    checkRelationAttrs(r, p, err);
     // Sprint 7: realizes = 구현체(레지스트리 realizes: true) → Logical 컴포넌트. 속성 없음, 같은 쌍 하나
     if (r.type === 'realizes' && isObj(components[r.from]) && isObj(components[r.to])) {
       if (!typeDef(components[r.from].type)?.realizes) err('V2', `${p}.from`, 'realizes의 시작은 Process·Managed DB·Managed Auth여야 합니다.');
@@ -292,6 +394,9 @@ function validateModel(model) {
     });
   });
 
+  // V10·V14 (Sprint 8, D-25): API Flow
+  if (isObj(model.flows)) checkFlows(model.flows, components, err);
+
   // V7: 어느 View에도 노드가 없는 컴포넌트 → 경고
   for (const id of Object.keys(components)) {
     if (!componentsWithNode.has(id)) warnings.push({ rule: 'V7', path: `components.${id}`, message: '어느 View에도 표시되지 않는 컴포넌트입니다.' });
@@ -306,4 +411,4 @@ function validateModel(model) {
   return { errors, warnings, tooLarge: null };
 }
 
-module.exports = { validateModel, MODEL_MAX_BYTES, MODEL_MAX_COMPONENTS, REGISTRY, NOTE_TEXT_MAX, GROUP_MIN_SIZE, MAX_DEPLOYMENT_VIEWS, VARIANT_MAX, STRATEGY_MAX_BYTES };
+module.exports = { FLOW_LIMITS, validateModel, MODEL_MAX_BYTES, MODEL_MAX_COMPONENTS, REGISTRY, NOTE_TEXT_MAX, GROUP_MIN_SIZE, MAX_DEPLOYMENT_VIEWS, VARIANT_MAX, STRATEGY_MAX_BYTES };

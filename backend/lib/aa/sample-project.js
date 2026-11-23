@@ -33,6 +33,8 @@ async function createSampleProject(db, { userId, name, description, readmeMd, sa
       rows.push({
         id: links[r.key], project_id: project.id, user_id: userId, code, kind: r.kind, category: r.category,
         title: r.title, description: r.description, target: r.target, metric: r.metric, priority: r.priority, sort_order: i,
+        // Sprint 8 (REQ-06): 여러 행 insert는 빠진 키를 NULL로 채운다(measurement는 NOT NULL) → 모든 행에 넣는다
+        measurement: r.measurement ?? {},
       });
     }
     const { error: insertError } = await db.from('aa_requirements').insert(rows);

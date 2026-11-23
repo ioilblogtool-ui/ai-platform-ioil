@@ -1,5 +1,5 @@
 // 발행 시점 요구사항 스냅샷 (Sprint 6 Step 1 · 03 §6.2).
-// 모델(컴포넌트·관계)이 참조하는 요구사항만, 지금 프로젝트에 있는 것만 담는다.
+// 모델(컴포넌트·관계·흐름 — 흐름은 Sprint 8)이 참조하는 요구사항만, 지금 프로젝트에 있는 것만 담는다.
 // 형식: { "<uuid>": { code, kind, category, title, target, metric, priority } }
 const { canonicalJson, sha256 } = require('./model-canon');
 
@@ -9,6 +9,7 @@ function referencedRequirementIds(model) {
   const ids = new Set();
   for (const c of Object.values(model?.components ?? {})) for (const id of c.requirementIds ?? []) ids.add(id);
   for (const r of Object.values(model?.relations ?? {})) for (const id of r.requirementIds ?? []) ids.add(id);
+  for (const f of Object.values(model?.flows ?? {})) for (const id of f?.requirementIds ?? []) ids.add(id);
   return ids;
 }
 

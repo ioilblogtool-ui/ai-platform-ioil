@@ -24,7 +24,7 @@ const LATER = new Set(['model-json', 'png']);
 const SCOPE_TYPES = new Set(['project', 'view', 'components', 'requirement', 'flow']);
 
 const SCOPE_ERRORS = {
-  scope_flow: 'API Flow 범위는 아직 지원하지 않습니다 (Sprint 8).',
+  scope_flow: '선택한 API Flow를 이 원본(Draft 또는 버전)에서 찾을 수 없습니다.',
   scope_view: '지금은 Logical View(view_logical)만 범위로 고를 수 있습니다.',
   scope_components: '선택한 컴포넌트를 이 프로젝트의 Draft에서 찾을 수 없습니다.',
   scope_requirement: '선택한 요구사항을 이 프로젝트에서 찾을 수 없습니다.',
@@ -46,6 +46,7 @@ function scopeKey(scope) {
   if (type === 'view') return { type, viewId: scope.viewId };
   if (type === 'components') return { type, componentIds: [...(scope.componentIds ?? [])].sort() };
   if (type === 'requirement') return { type, requirementId: String(scope.requirementId ?? '').toLowerCase() };
+  if (type === 'flow') return { type, flowId: scope.flowId };
   return { type };
 }
 
@@ -65,6 +66,9 @@ function validateAskAi(body) {
   }
   if (scope?.type === 'requirement' && !(typeof scope.requirementId === 'string' && UUID_RE.test(scope.requirementId))) {
     return { status: 400, code: 'VALIDATION_FAILED', message: 'requirementId는 UUID여야 합니다.' };
+  }
+  if (scope?.type === 'flow' && !(typeof scope.flowId === 'string' && /^flw_[A-Za-z0-9]{10}$/.test(scope.flowId))) {
+    return { status: 400, code: 'VALIDATION_FAILED', message: 'flowId는 흐름 ID(flw_…)여야 합니다.' };
   }
   if (template !== undefined && !(typeof template === 'string' && Object.hasOwn(TEMPLATES, template))) {
     return { status: 400, code: 'VALIDATION_FAILED', message: SCOPE_ERRORS.template };
@@ -105,7 +109,7 @@ router.post('/', wrap(async (req, res) => {
   const [project, draft, reqs, latestV] = await Promise.all([
     supabase.from('aa_projects').select('name, readme_md').eq('id', req.project.id).eq('user_id', req.user.id).maybeSingle(),
     supabase.from('aa_architecture_drafts').select('model, revision').eq('project_id', req.project.id).eq('user_id', req.user.id).maybeSingle(),
-    supabase.from('aa_requirements').select('id, code, kind, title, category, target, metric, status')
+    supabase.from('aa_requirements').select('id, code, kind, title, category, target, metric, status, measurement')
       .eq('project_id', req.project.id).eq('user_id', req.user.id).range(0, 999),
     supabase.from('aa_architecture_versions').select(versionCols)
       .eq('project_id', req.project.id).eq('user_id', req.user.id).order('version_no', { ascending: false }).limit(1).maybeSingle(),
@@ -138,6 +142,11 @@ router.post('/', wrap(async (req, res) => {
   let out;            // { content, hashBody, filename, contentType, extra, bindingExtra }
 
   if (format === 'readme-md') {
+    // Sprint 8: sections.apiFlows — 원본 모델에 없는 흐름 id는 400
+    const flowIds = Array.isArray(sections?.apiFlows) ? sections.apiFlows : [];
+    if (sections?.apiFlows !== undefined && (!Array.isArray(sections.apiFlows) || flowIds.some((fid) => typeof fid !== 'string' || !model?.flows?.[fid]))) {
+      return sendError(res, 400, 'VALIDATION_FAILED', 'apiFlows에는 이 원본(Draft 또는 버전)에 있는 흐름 ID만 넣을 수 있습니다.');
+    }
     const built = buildReadme({ project: projectInfo, model, revision, basis, requirements: requirementList, sections });
     out = {
       content: built.body + readmeFooter(readAt), hashBody: built.body, filename: built.filename, contentType: 'text/markdown',
@@ -157,7 +166,7 @@ router.post('/', wrap(async (req, res) => {
       scope: body.scope, template: body.template ?? 'design-review', question: body.question ?? '', bundleId, readAt: readAt.toISOString(),
     });
     if (built.error) {
-      const status = built.error === 'scope_components' || built.error === 'scope_requirement' ? 404 : 400;
+      const status = built.error === 'scope_components' || built.error === 'scope_requirement' || built.error === 'scope_flow' ? 404 : 400;
       return sendError(res, status, status === 404 ? 'NOT_FOUND' : 'VALIDATION_FAILED', SCOPE_ERRORS[built.error] ?? '요청을 확인해 주세요.');
     }
     const scopeSlug = slugify((body.scope?.type ?? 'project'));

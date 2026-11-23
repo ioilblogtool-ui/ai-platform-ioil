@@ -81,11 +81,23 @@ function summarize(prev, next) {
     relationsRemoved: rel.removed,
     relationsModified: rel.modified,
     nodesReparented: views.nodesReparented,
-    viewChanges: views.viewChanges + (same(a.flows ?? null, b.flows ?? null) ? 0 : 1),
+    viewChanges: views.viewChanges,
     layoutOnly: layoutChanges(prev.model, next.model),
     requirementsChanged: reqs.total,
     strategiesChanged,
+    // Sprint 8: 흐름 — 같은 흐름의 변경은 구조·요구사항·본문이 함께 바뀌어도 1 (03 §4)
+    ...flowCounts(a.flows ?? {}, b.flows ?? {}),
   };
+}
+
+function flowCounts(before, after) {
+  let flowsAdded = 0, flowsRemoved = 0, flowsModified = 0;
+  for (const [id, fl] of Object.entries(after)) {
+    if (!before[id]) flowsAdded++;
+    else if (!same(before[id], fl)) flowsModified++;
+  }
+  for (const id of Object.keys(before)) if (!after[id]) flowsRemoved++;
+  return { flowsAdded, flowsRemoved, flowsModified };
 }
 
 /** 의미 변경이 하나라도 있는가 (layoutOnly 제외) */
@@ -97,7 +109,8 @@ function hasSemanticChanges(summary) {
 // ── 상세 변경 목록 (Sprint 7 Step 4 · 05 §4 compare · 03 §4) ─────────────────────
 const SNAP_FIELDS = ['code', 'kind', 'category', 'title', 'target', 'metric', 'priority'];
 const COMPONENT_FIELDS = ['name', 'type', 'technology', 'description'];
-const RELATION_FIELDS = ['type', 'from', 'to', 'protocol', 'mode', 'label'];
+const RELATION_FIELDS = ['type', 'from', 'to', 'protocol', 'mode', 'label', 'timeoutMs', 'retry', 'onFailure', 'credential', 'dataClass'];
+const SECURITY_FIELDS = new Set(['credential', 'dataClass']);   // Sprint 8: relation.security → relation.modified.security
 
 /** 두 값의 경로별 차이 (객체는 한 단계 펼침: properties.port, custom.key) */
 function fieldDiffs(a, b, fields, nested = []) {
@@ -151,7 +164,10 @@ function diffModels(prev, next, opts = {}) {
     const o = ra[id];
     if (!o) { changes.push({ kind: 'relation.added', ...relInfo(r), protocol: r.protocol ?? null }); continue; }
     const fields = fieldDiffs(o, r, RELATION_FIELDS).filter((f) => f.path !== 'tags');
-    if (fields.length) changes.push({ kind: 'relation.modified', ...relInfo(r), fields });
+    if (fields.length) {
+      const security = fields.some((x) => SECURITY_FIELDS.has(x.path));
+      changes.push({ kind: 'relation.modified', ...relInfo(r), fields, ...(security ? { security: true } : {}) });
+    }
     const q = reqDiff(o.requirementIds, r.requirementIds);
     if (q.added.length || q.removed.length) changes.push({ kind: 'relation.requirements', ...relInfo(r), ...q });
   }
@@ -186,6 +202,45 @@ function diffModels(prev, next, opts = {}) {
     for (const n of o.nodes) if (!nb.has(n.id)) changes.push({ kind: 'view.node.removed', viewId: id, nodeId: n.id, name: nodeName(A, o, n) });
   }
   for (const [id, v] of va) if (!vb.has(id)) changes.push({ kind: 'view.removed', viewId: id, viewKind: v.kind, variant: v.variant ?? v.name });
+
+  // API Flow (Sprint 8)
+  const fa = A.flows ?? {}, fb = B.flows ?? {};
+  // 후속 수정: 이름이 같은 컴포넌트가 있으면 기술/타입(그래도 같으면 id)을 붙여 구분한다 — 역할 이동·순서 바꿈이 보이게
+  const CAUSE = { auth: '인증', validation: '입력 검증', timeout: '타임아웃', dependency_down: '의존 서비스 장애', queue_retry: '큐 재처리', other: '기타' };
+  const label = (model, cid) => {
+    const c = model.components?.[cid];
+    if (!c) return '(삭제된 컴포넌트)';
+    const same = Object.values(model.components).filter((x) => x.id !== c.id && x.name === c.name);
+    if (!same.length) return c.name;
+    const hint = c.technology || c.type;
+    return same.some((x) => (x.technology || x.type) === hint) ? `${c.name} (${cid})` : `${c.name} (${hint})`;
+  };
+  const names = (model, ids) => (ids ?? []).map((cid) => label(model, cid));
+  const endpointText = (fl) => (fl?.endpoint ? `${fl.endpoint.method} ${fl.endpoint.path}` : null);
+  const outcomeText = (fl) => (fl?.outcomes ?? []).map((o) => `${o.kind === 'success' ? '✓' : '✕'} ${o.label}${o.cause ? ` (${CAUSE[o.cause] ?? o.cause})` : ''}`);
+  const authText = (model, fl) => Object.fromEntries(['tokenIssuer', 'tokenVerifier', 'dataAccessor']
+    .filter((k) => fl?.auth?.[k]).map((k) => [k, label(model, fl.auth[k])]));
+  for (const [id, fl] of Object.entries(fb)) {
+    const o = fa[id];
+    if (!o) { changes.push({ kind: 'flow.added', flowId: id, name: fl.name, endpoint: endpointText(fl) }); continue; }
+    const fields = [];
+    const cmp = (path, before, after) => { if (!same(before ?? null, after ?? null)) fields.push({ path, before: before ?? null, after: after ?? null }); };
+    cmp('name', o.name, fl.name);
+    cmp('endpoint', endpointText(o), endpointText(fl));
+    cmp('description', o.description, fl.description);
+    cmp('participants', names(A, o.participantIds), names(B, fl.participantIds));
+    if (same(names(A, o.participantIds), names(B, fl.participantIds)) && !same(o.participantIds, fl.participantIds)) {
+      fields.push({ path: 'participants', before: names(A, o.participantIds), after: names(B, fl.participantIds) });
+    }
+    cmp('outcomes', outcomeText(o), outcomeText(fl));
+    if (same(outcomeText(o), outcomeText(fl)) && !same(o.outcomes, fl.outcomes)) fields.push({ path: 'outcomes', before: outcomeText(o), after: outcomeText(fl) });
+    cmp('auth', authText(A, o), authText(B, fl));
+    if (fields.length) changes.push({ kind: 'flow.modified', flowId: id, name: fl.name, fields });
+    const q = reqDiff(o.requirementIds, fl.requirementIds);
+    if (q.added.length || q.removed.length) changes.push({ kind: 'flow.requirements', flowId: id, name: fl.name, ...q });
+    if ((o.mermaid ?? '') !== (fl.mermaid ?? '')) changes.push({ kind: 'flow.mermaid', flowId: id, name: fl.name });
+  }
+  for (const [id, fl] of Object.entries(fa)) if (!fb[id]) changes.push({ kind: 'flow.removed', flowId: id, name: fl.name, endpoint: endpointText(fl) });
 
   // 요구사항 스냅샷 (발행 당시 값의 차이)
   for (const id of [...new Set([...Object.keys(snapA), ...Object.keys(snapB)])]) {

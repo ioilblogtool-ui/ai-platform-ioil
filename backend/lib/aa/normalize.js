@@ -27,6 +27,15 @@ function firstLine(text) {
  * @param {object} model Draft 모델
  * @param {{ requirements?: Array<{id:string,code:string,kind:string,title:string,status?:string,category?:string|null,target?:string|null,metric?:string|null}> }} [context]
  */
+const ON_FAILURE_LABEL = { propagate: '오류 전파', fallback: '대체 응답', queue_retry: '큐 재처리', ignore: '무시' };
+/** calls 운영·보안 속성 한 줄 (없으면 null). 자격증명은 유형만 */
+function relationOps(r) {
+  const timeout = r.timeoutMs === undefined ? null : r.timeoutMs % 1000 === 0 ? `timeout ${r.timeoutMs / 1000}s` : `timeout ${r.timeoutMs}ms`;
+  const parts = [timeout, r.retry ? `retry ${r.retry.max}회 ${r.retry.backoff}` : null, r.onFailure ? `실패 시 ${ON_FAILURE_LABEL[r.onFailure] ?? r.onFailure}` : null,
+    r.credential ? `자격증명 ${r.credential}` : null, r.dataClass ? `데이터 ${r.dataClass}` : null].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
+}
+
 function normalizeModel(model, context = {}) {
   const requirements = context.requirements ?? [];
   const codeOf = new Map(requirements.map((r) => [String(r.id).toLowerCase(), r.code]));
@@ -104,6 +113,8 @@ function normalizeModel(model, context = {}) {
       mode: r.mode || null,
       label: r.label || null,
       requirementCodes: codes(r.requirementIds),
+      // Sprint 8 (REL-05·06): 있을 때만 — 없는 모델의 출력이 Sprint 7과 같게
+      ...(r.type === 'calls' && relationOps(r) ? { ops: relationOps(r) } : {}),
     }));
 
   // 그룹 ref도 내부 노드 ID 대신 순번(g1, g2…)을 쓴다. parent는 바로 위 그룹
@@ -125,7 +136,11 @@ function normalizeModel(model, context = {}) {
 
   const reqs = requirements
     .filter((r) => r.status !== 'deprecated')
-    .map((r) => ({ code: r.code, kind: r.kind, title: r.title, category: r.category ?? null, target: r.target ?? null, metric: r.metric ?? null }))
+    .map((r) => ({
+      code: r.code, kind: r.kind, title: r.title, category: r.category ?? null, target: r.target ?? null, metric: r.metric ?? null,
+      // Sprint 8 (REQ-06): 측정 기준(Draft 기준일 때만 들어온다 — 버전 스냅샷에는 없음)
+      ...(r.measurement && Object.keys(r.measurement).length ? { measurement: r.measurement } : {}),
+    }))
     .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 
   const result = {
@@ -139,7 +154,11 @@ function normalizeModel(model, context = {}) {
   if (context.withIndex) {
     Object.defineProperty(result, 'index', {
       enumerable: false,
-      value: { componentRefById: new Map([...nameOf].map(([id, entry]) => [id, entry.ref])) },
+      value: {
+        componentRefById: new Map([...nameOf].map(([id, entry]) => [id, entry.ref])),
+        // Sprint 8: 흐름의 requirementIds → 코드 (사용 중단 포함 — 연결 표시는 코드만)
+        requirementCodeById: new Map(requirements.map((r) => [String(r.id).toLowerCase(), r.code])),
+      },
     });
   }
   return result;
