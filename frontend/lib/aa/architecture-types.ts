@@ -288,7 +288,7 @@ export interface AskAiExportRequest {
   scope?: AskAiScope;
   template?: AskAiTemplate;
   question?: string;
-  noteIds?: [];
+  noteIds?: string[];
   acknowledgedScan?: string | null;
 }
 export interface AskAiExportResult {

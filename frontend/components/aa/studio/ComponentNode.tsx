@@ -4,8 +4,10 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { AaComponentFlowNode } from '@/lib/aa/graph-mapper';
 import { CATEGORY_COLOR, TYPE_FALLBACK } from './palette-meta';
+import { useComponentNoteCounts } from './StudioNotes';
 
 export default function ComponentNode({ data, selected }: NodeProps<AaComponentFlowNode>) {
+  const notes = useComponentNoteCounts(data.componentId);
   const meta = TYPE_FALLBACK[data.type] ?? { icon: '▭', category: 'application' };
   const color = CATEGORY_COLOR[meta.category] ?? 'rgba(255,255,255,0.4)';
   const edge = selected ? '#c8a96e' : data.warning ? '#f5a524' : 'rgba(255,255,255,0.12)';
@@ -27,6 +29,10 @@ export default function ComponentNode({ data, selected }: NodeProps<AaComponentF
       {data.warning && <div style={{ color: '#f5a524', fontSize: 10.5, marginTop: 3 }}>⚠ {data.warning}</div>}
       {data.sharedViews && <span data-testid="aa-node-shared" title={`다른 View에도 있는 컴포넌트 (${data.sharedViews}곳)`} aria-label={`참조 노드 · ${data.sharedViews}개 View`}
         style={{ position: 'absolute', right: 6, bottom: 4, fontSize: 11, color: '#c8a96e' }}>⧉</span>}
+      {notes && <div data-testid="aa-node-notes" style={{ fontSize: 11, marginTop: 3, color: '#c8a96e' }}>
+        <span aria-label={`노트 ${notes.total}개`}>📝 {notes.total}</span>
+        {notes.openQuestions > 0 && <span aria-label={`열린 질문 ${notes.openQuestions}개`}> · ?{notes.openQuestions}</span>}
+      </div>}
       <Handle type="source" position={Position.Right} style={handle} />
     </div>
   );

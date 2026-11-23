@@ -15,6 +15,7 @@ import { createAutosave } from './autosave';
 import { readDraftBackup, removeDraftBackup, writeDraftBackup } from './draft-backup';
 
 export type SaveState = 'loading' | 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
+export const HISTORY_LIMIT = 100;
 type Point = { x: number; y: number };
 
 /** 확인이 필요한 삭제 (컴포넌트가 포함된 경우). 그룹·노트·엣지만이면 바로 삭제한다 */
@@ -29,6 +30,10 @@ type StudioState = {
   projectName: string;
   model: ArchitectureModel | null;
   viewId: string;
+  past: ArchitectureModel[];
+  future: ArchitectureModel[];
+  undo: () => boolean;
+  redo: () => boolean;
   baseRevision: number;
   /** Draft가 마지막으로 발행·복원한 버전 (Sprint 6) */
   baseVersion: VersionRef | null;
@@ -118,7 +123,7 @@ type StudioState = {
   importUndo: { model: ArchitectureModel; revision: number; summary: ops.ImportSummary } | null;
   /** 가져오기 적용 (Step 3 ①~⑦). build는 그 시점의 최신 모델로 병합 결과를 만든다 */
   applyImport: (build: (latest: ArchitectureModel) => ImportBuild) => Promise<ImportOutcome>;
-  undoImport: () => Promise<ImportOutcome>;
+  undoImport: () => boolean;
   dismissImportUndo: () => void;
 };
 
@@ -176,11 +181,16 @@ export const useStudio = create<StudioState>((set, get) => {
     }
   };
 
-  const commitEdit = () => {
+  const appendHistory = (past: ArchitectureModel[], model: ArchitectureModel) => [...past.slice(1 - HISTORY_LIMIT), model];
+
+  const commitEdit = (previous?: ArchitectureModel) => {
     const { editSeq, model, saveState, recovery } = get();
     committedModel = model;
     // 가져오기 되돌리기는 가져온 직후에만 가능하다 (Q5)
-    set({ editSeq: editSeq + 1, saveState: dirtyState(saveState), importUndo: null });
+    set({
+      editSeq: editSeq + 1, saveState: dirtyState(saveState), importUndo: null,
+      ...(previous ? { past: appendHistory(get().past, previous), future: [] } : {}),
+    });
     backup();
     if (!pausedForAuth && !recovery && saveState !== 'saving' && saveState !== 'conflict') {
       retryUsed = false;
@@ -263,8 +273,10 @@ export const useStudio = create<StudioState>((set, get) => {
     if (!model || recovery || reloading || importing) return false;
     const next = fn(model, viewId);
     if (next === model) return false;
+    const previous = committedModel ?? model;
+    changedDuringGesture = false;
     set({ model: next });
-    commitEdit();
+    commitEdit(previous);
     return true;
   };
 
@@ -278,8 +290,28 @@ export const useStudio = create<StudioState>((set, get) => {
   };
   const commitGesture = (fn: (m: ArchitectureModel, viewId: string) => ArchitectureModel) => {
     const changed = edit(fn);
-    if (!changed && changedDuringGesture && !get().reloading && !get().recovery) commitEdit();
+    if (!changed && changedDuringGesture && committedModel && !get().reloading && !get().recovery && !get().importing) commitEdit(committedModel);
     changedDuringGesture = false;
+  };
+
+  const travelHistory = (direction: 'undo' | 'redo') => {
+    const { model, viewId, past, future, selectedFlowId, highlightFlowId, recovery, reloading, importing, pendingDelete } = get();
+    if (!model || recovery || reloading || importing || pendingDelete || changedDuringGesture) return false;
+    const target = (direction === 'undo' ? past : future).at(-1);
+    if (!target) return false;
+    const repair = flowOps.repairFlows(target);
+    set({
+      model: target,
+      viewId: target.views.some((view) => view.id === viewId) ? viewId : 'view_logical',
+      selectedNodeIds: [], selectedEdgeIds: [], focusNodeId: null, placementWarnings: [],
+      selectedFlowId: selectedFlowId && target.flows?.[selectedFlowId] ? selectedFlowId : Object.keys(target.flows ?? {})[0] ?? null,
+      highlightFlowId: highlightFlowId && target.flows?.[highlightFlowId] ? highlightFlowId : null,
+      flowRepair: repair.underTwo.length ? { removed: 0, underTwo: repair.underTwo } : null,
+      past: direction === 'undo' ? past.slice(0, -1) : appendHistory(past, model),
+      future: direction === 'redo' ? future.slice(0, -1) : appendHistory(future, model),
+    });
+    commitEdit();
+    return true;
   };
 
   const runDelete = (nodeIds: string[], edgeIds: string[], deleteComponents: boolean) => {
@@ -295,17 +327,29 @@ export const useStudio = create<StudioState>((set, get) => {
     });
   };
 
-  const addNode = (fn: (m: ArchitectureModel, viewId: string) => { model: ArchitectureModel; nodeId: string | null }) => {
+  const addNode = (
+    build: (model: ArchitectureModel, viewId: string) => { model: ArchitectureModel; nodeId: string | null },
+    dropPosition?: Point,
+  ) => {
     let nodeId: string | null = null;
-    edit((m, vid) => { const r = fn(m, vid); nodeId = r.nodeId; return r.model; });
+    edit((model, viewId) => {
+      const result = build(model, viewId);
+      nodeId = result.nodeId;
+      if (!nodeId || !dropPosition) return result.model;
+      const registry = get().registry;
+      const parent = ops.findDropGroup(result.model, viewId, dropPosition, nodeId, registry);
+      return parent ? ops.setParent(result.model, viewId, nodeId, parent, registry) : result.model;
+    });
     if (nodeId) set({ selectedNodeIds: [nodeId], selectedEdgeIds: [] });
-    return nodeId as string | null;
   };
 
   return {
     projectId: null,
     projectName: '',
     model: null,
+    past: [], future: [],
+    undo: () => travelHistory('undo'),
+    redo: () => travelHistory('redo'),
     viewId: 'view_logical',
     baseRevision: 0,
     baseVersion: null,
@@ -441,7 +485,7 @@ export const useStudio = create<StudioState>((set, get) => {
       ownedBackup = null;
       committedModel = null;
       set({
-        projectId, saveState: 'loading', loadError: null, model: null,
+        projectId, saveState: 'loading', loadError: null, model: null, past: [], future: [],
         selectedNodeIds: [], selectedEdgeIds: [], pendingDelete: null,
         panel: 'canvas', selectedFlowId: null, highlightFlowId: null, flowRepair: null,
         conflictRevision: null, saveMessage: null, backupMessage: null, recovery: null, reloading: false,
@@ -476,7 +520,7 @@ export const useStudio = create<StudioState>((set, get) => {
           registry, saveState: 'saved', editSeq: 0, recovery, backupMessage,
         });
         void get().loadRequirements();
-        if (repaired.model !== draft.model) edit(() => repaired.model);   // 정리 결과는 편집으로 (자동 저장 대상)
+        if (repaired.model !== draft.model && !recovery) { set({ model: repaired.model }); commitEdit(); }
       } catch (error) {
         if (session !== currentSession) return;
         const message = error instanceof AaApiError && error.code === 'NOT_FOUND'
@@ -491,7 +535,7 @@ export const useStudio = create<StudioState>((set, get) => {
       ownedBackup = recovery.raw;
       const older = recovery.value.revision < baseRevision;
       set({
-        model: recovery.value.model,
+        model: recovery.value.model, past: [], future: [], importUndo: null,
         recovery: null,
         saveState: older ? 'conflict' : 'dirty',
         conflictRevision: older ? baseRevision : null,
@@ -523,7 +567,7 @@ export const useStudio = create<StudioState>((set, get) => {
           viewId: draft.model.views.some((v) => v.id === get().viewId) ? get().viewId : 'view_logical',
           placementWarnings: (draft.warnings ?? []).filter((w) => w.rule === 'V11'),
           conflictRevision: null, reloading: false, selectedNodeIds: [], selectedEdgeIds: [],
-          pendingDelete: null, editSeq: 0,
+          pendingDelete: null, editSeq: 0, past: [], future: [], importUndo: null,
         });
       } catch (error) {
         if (session !== currentSession) return;
@@ -539,35 +583,19 @@ export const useStudio = create<StudioState>((set, get) => {
     },
 
     addComponent(type, position) {
-      const nodeId = addNode((m, vid) => ops.addComponent(m, vid, type, get().registry, position, newId));
-      // 그룹 위에 놓았으면 그 그룹의 자식으로
-      if (nodeId) {
-        const { model, viewId } = get();
-        const g = model && ops.findDropGroup(model, viewId, position, nodeId, get().registry);
-        if (g) edit((m, vid) => ops.setParent(m, vid, nodeId, g, get().registry));
-      }
+      addNode((model, viewId) => ops.addComponent(model, viewId, type, get().registry, position, newId), position);
     },
 
     addReference(componentId, position) {
-      const nodeId = addNode((m, vid) => ops.addReferenceNode(m, vid, componentId, get().registry, position, newId));
-      if (nodeId) {
-        const { model, viewId } = get();
-        const g = model && ops.findDropGroup(model, viewId, position, nodeId, get().registry);
-        if (g) edit((m, vid) => ops.setParent(m, vid, nodeId, g, get().registry));
-      }
+      addNode((model, viewId) => ops.addReferenceNode(model, viewId, componentId, get().registry, position, newId), position);
     },
 
     addGroup(position) {
-      addNode((m, vid) => ops.addGroup(m, vid, position, ops.GROUP_DEFAULT_SIZE, newId));
+      addNode((model, viewId) => ops.addGroup(model, viewId, position, ops.GROUP_DEFAULT_SIZE, newId));
     },
 
     addNote(position) {
-      const nodeId = addNode((m, vid) => ops.addNote(m, vid, position, '메모', newId));
-      if (nodeId) {
-        const { model, viewId } = get();
-        const g = model && ops.findDropGroup(model, viewId, position, nodeId, get().registry);
-        if (g) edit((m, vid) => ops.setParent(m, vid, nodeId, g, get().registry));
-      }
+      addNode((model, viewId) => ops.addNote(model, viewId, position, '메모', newId), position);
     },
 
     applyNodeChanges(changes) {
@@ -599,7 +627,11 @@ export const useStudio = create<StudioState>((set, get) => {
           for (const r of resizes) next = ops.resizeGroup(next, vid, r.id, r);
           return next;
         };
-        if (final) commitGesture(apply); else preview(apply);
+        preview(apply);
+        if (final) {
+          const currentSession = session;
+          queueMicrotask(() => { if (session === currentSession && changedDuringGesture) commitGesture((model) => model); });
+        }
       }
       if (removes.length) get().requestDelete(removes, []);
     },
@@ -624,7 +656,8 @@ export const useStudio = create<StudioState>((set, get) => {
       const { model, viewId } = get();
       if (!model) return;
       const target = ops.findDropGroup(model, viewId, center, nodeId, get().registry);
-      edit((m, vid) => ops.setParent(m, vid, nodeId, target, get().registry));
+      const update = (m: ArchitectureModel, vid: string) => ops.setParent(m, vid, nodeId, target, get().registry);
+      if (changedDuringGesture) preview(update); else edit(update);
     },
 
     requestDelete(nodeIds, edgeIds) {
@@ -702,10 +735,16 @@ export const useStudio = create<StudioState>((set, get) => {
       if (!projectId) return;
       const currentSession = session;
       try {
-        // 요구사항 API 한 페이지 최대치(200건)만 후보로 쓴다
-        const res = await listRequirements(projectId, { limit: 200 });
-        if (session !== currentSession) return;
-        set({ requirements: res.data, requirementsError: null });
+        // Sprint 9 Q10: 한 페이지 최대치(200건)를 넘으면 페이지를 이어 읽는다 (201번째부터 흐름·Inspector 후보에서 빠지던 문제)
+        const PAGE = 200;
+        const all: Requirement[] = [];
+        for (let offset = 0; ; offset += PAGE) {
+          const res = await listRequirements(projectId, { limit: PAGE, offset });
+          if (session !== currentSession) return;
+          all.push(...(res.data ?? []));
+          if (!res.data?.length || all.length >= (res.total ?? all.length) || offset > 20 * PAGE) break;   // 안전 상한 4,200건
+        }
+        set({ requirements: all, requirementsError: null });
       } catch (error) {
         if (session !== currentSession) return;
         set({ requirementsError: (error as Error).message });
@@ -726,14 +765,13 @@ export const useStudio = create<StudioState>((set, get) => {
     // ── Mermaid 가져오기 (Sprint 4 Step 3, 실행계획 "적용 순서" ①~⑦) ──
     // ①(Inspector 대기 입력 반영)은 호출하는 화면에서 먼저 한다.
     async applyImport(build) {
-      const outcome = await saveWholeModel((latest) => build(latest), true);
+      const outcome = await saveWholeModel(build);
       return outcome;
     },
 
-    async undoImport() {
-      const undo = get().importUndo;
-      if (!undo) return { status: 'invalid', error: 'no_undo' };
-      return saveWholeModel(() => ({ model: undo.model, summary: undo.summary }), false);
+    undoImport() {
+      const { importUndo, past } = get();
+      return !!importUndo && past.at(-1) === importUndo.model && travelHistory('undo');
     },
 
     dismissImportUndo() {
@@ -741,8 +779,8 @@ export const useStudio = create<StudioState>((set, get) => {
     },
   };
 
-  // 가져오기 적용·되돌리기 공통 저장. Draft PUT은 많아야 1회다.
-  async function saveWholeModel(build: (latest: ArchitectureModel) => ImportBuild, isImport: boolean): Promise<ImportOutcome> {
+  // 가져오기 적용 저장. Draft PUT은 많아야 1회다.
+  async function saveWholeModel(build: (latest: ArchitectureModel) => ImportBuild): Promise<ImportOutcome> {
     const { projectId, importing, recovery, reloading } = get();
     if (!projectId || importing || recovery || reloading) return { status: 'blocked', reason: 'busy' };
     const currentSession = session;
@@ -773,14 +811,15 @@ export const useStudio = create<StudioState>((set, get) => {
       try {
         const res = await request;
         if (session !== currentSession) return { status: 'blocked', reason: 'busy' };
-        // ⑦ 성공: 모델·revision 반영, 되돌리기 정보 기록 (되돌리기 자체는 다시 되돌릴 수 없다)
+        // ⑦ 성공: 모델·revision 반영 후 Undo 한 단계 기록
         committedModel = built.model;
         clearBackup();
         set({
           model: built.model, baseRevision: res.revision, saveState: 'saved', conflictRevision: null,
           saveMessage: res.warnings.length ? `경고 ${res.warnings.length}건` : null,
           placementWarnings: res.warnings.filter((w) => w.rule === 'V11'),
-          importUndo: isImport ? { model: latest, revision: res.revision, summary: built.summary } : null,
+          past: appendHistory(state.past, latest), future: [],
+          importUndo: { model: latest, revision: res.revision, summary: built.summary },
           selectedNodeIds: [], selectedEdgeIds: [],
         });
         return { status: 'saved', revision: res.revision, summary: built.summary };

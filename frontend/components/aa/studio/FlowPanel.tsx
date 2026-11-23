@@ -9,6 +9,7 @@ import * as flowOps from '@/lib/aa/flow-ops';
 import { AUTH_ICON, AUTH_LABEL, fromEditorText, renderSource, templateBody, toEditorText, unknownIdentifiers, type AuthRole } from '@/lib/aa/flow-mermaid';
 import { useStudio } from '@/lib/aa/studio-store';
 import MermaidPreview from './MermaidPreview';
+import { StudioNotes } from './StudioNotes';
 import type { InspectorEdits } from './SchemaForm';
 
 const panel: CSSProperties = { borderRight: '1px solid rgba(255,255,255,0.07)', background: '#0a0a0c', padding: 12, overflowY: 'auto' };
@@ -214,6 +215,7 @@ function FlowDetail({ flow, model }: { flow: ApiFlow; model: ArchitectureModel }
           {!s.requirements.length && <span style={muted}>요구사항이 없습니다.</span>}
         </div>
 
+        <StudioNotes targetType="flow" targetRef={flow.id} />
         <DeleteFlow name={flow.name} onDelete={() => run((m) => ({ model: flowOps.removeFlow(m, flow.id) }))} />
       </div>
     </>

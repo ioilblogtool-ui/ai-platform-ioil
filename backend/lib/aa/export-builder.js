@@ -1,6 +1,6 @@
 // Ask AI 번들 빌더 (Sprint 5 Step 1 · EXP-04~08·10·11 · 05 §7.6 · Q3·Q5·Q8·Q12).
 // 순수 함수. 공통 정규화(normalize.js) 위에서 범위를 자르고 번들마다 별칭(C1…, G1…)을 새로 매긴다.
-// 내부 ID·좌표·노트는 출력에 넣지 않는다. bundleId·읽은 시각은 헤더(ai-md 첫 줄 / ai-json의 두 필드)에만 넣고,
+// 내부 ID·좌표는 출력에 넣지 않는다. 선택한 노트만 포함한다. bundleId·읽은 시각은 헤더(ai-md 첫 줄 / ai-json의 두 필드)에만 넣고,
 // contentHash는 그것을 뺀 본문으로 계산한다 (같은 입력이면 같은 해시).
 const { normalizeModel } = require('./normalize');
 const { basisText, basisShort, basisJson } = require('./export-basis');
@@ -82,7 +82,7 @@ function resolveScope(n, scope, requirements, model) {
  * @returns {{ content: string, hashBody: string, filenameStem: string, scopeLabel: string,
  *             counts: { components: number, relations: number }, omitted: { components: number } } | { error: string }}
  */
-function buildAskAi({ project, model, revision, basis, requirements = [], format, scope, template = 'design-review', question = '', bundleId, readAt }) {
+function buildAskAi({ project, model, revision, basis, requirements = [], notes = [], format, scope, template = 'design-review', question = '', bundleId, readAt }) {
   const b = basis ?? { source: 'draft', revision };   // Sprint 6: 버전 기준이면 { source: 'version', label, publishedAt }
   if (!Object.hasOwn(TEMPLATES, template)) return { error: 'template' };
   const q = String(question ?? '').trim();
@@ -139,8 +139,46 @@ function buildAskAi({ project, model, revision, basis, requirements = [], format
     requirements: resolved.flowReqCodes,
     sequence: flowSequence(resolved.flow, model, { idFor: (cid) => aliasOfCid(cid), nameFor: (cid) => `${aliasOfCid(cid)} ${nameOfCid(cid)}` }).source,
   } : null;
+  const stageNames = { requirements: '요구사항 정리', design: '설계', review: '리뷰', validation: '검증', retro: '회고' };
+  const missingTarget = '(이 원본에 없는 대상)';
+  const outside = (name, included) => name ? name + (included ? '' : ' (범위 밖)') : missingTarget;
+  function targetLabel(note) {
+    const id = note.target_ref;
+    switch (note.target_type) {
+      case 'project': return '프로젝트';
+      case 'stage': return stageNames[id] || missingTarget;
+      case 'component': {
+        const name = model.components?.[id]?.name;
+        const marker = alias.get(refOf.get(id));
+        return marker && name ? marker + ' ' + name : outside(name, false);
+      }
+      case 'relation': {
+        const relation = model.relations?.[id];
+        if (!relation) return missingTarget;
+        const from = model.components?.[relation.from]?.name;
+        const to = model.components?.[relation.to]?.name;
+        if (!from || !to) return missingTarget;
+        const a = alias.get(refOf.get(relation.from));
+        const z = alias.get(refOf.get(relation.to));
+        return a && z ? a + ' ' + from + ' → ' + z + ' ' + to : outside(from + ' → ' + to, false);
+      }
+      case 'flow': return outside(model.flows?.[id]?.name, resolved.flow?.id === id);
+      case 'view': {
+        const view = model.views?.find((entry) => entry.id === id);
+        return outside(view?.variant || view?.name, id === 'view_logical' && (!scope || ['project', 'view'].includes(scope.type)));
+      }
+      case 'requirement': {
+        const code = requirements.find((entry) => entry.id === id)?.code;
+        return outside(code, reqs.some((entry) => entry.code === code));
+      }
+      case 'version': return note.versionLabel ?? missingTarget;
+      default: return missingTarget;
+    }
+  }
+  const selectedNotes = notes.map((note) => ({ kind: note.kind, target: targetLabel(note), title: note.title, bodyMd: note.body_md }));
   const outGroups = groups.map((g) => ({ alias: galias.get(g.ref), label: g.label, parent: g.parent ? galias.get(g.parent) ?? null : null }));
 
+  const versionNotes = () => b.source === 'version' && selectedNotes.length > 0;
   if (format === 'ai-json') {
     const stable = {
       schema: 'aa-ask-ai/1',
@@ -152,8 +190,9 @@ function buildAskAi({ project, model, revision, basis, requirements = [], format
       requirements: reqs.map((r) => ({ code: r.code, kind: KIND_LABEL[r.kind] ?? r.kind, title: r.title, target: r.target, metric: r.metric })),
       components: outComponents, relations: outRelations, groups: outGroups, omitted,
       ...(flowOut ? { flow: flowOut } : {}),
+      ...(selectedNotes.length ? { notes: selectedNotes } : {}),
     };
-    const full = { bundleId, readAt, ...stable };
+    const full = { bundleId, readAt, ...(versionNotes() ? { notesBasis: { label: '현재 기록', readAt } } : {}), ...stable };
     return {
       content: `${JSON.stringify(full, null, 2)}\n`,
       hashBody: JSON.stringify(stable),
@@ -211,6 +250,13 @@ function buildAskAi({ project, model, revision, basis, requirements = [], format
     body.push('', '# 구성도', '', '```mermaid', toMermaidFlowchart(view).trimEnd(), '```');
   }
   if (omitted.components) body.push('', '# 생략', '', `- 범위 밖 컴포넌트 ${omitted.components}개는 넣지 않았습니다.`);
+  if (selectedNotes.length) {
+    body.push('', '# 노트', '');
+    if (versionNotes()) body.push('> 현재 기록 — 조회 시각은 번들 읽은 시각과 같습니다.', '');
+    for (const note of selectedNotes) {
+      body.push('## ' + (note.title || note.kind), '', '- 종류: ' + note.kind, '- 대상: ' + note.target, '', note.bodyMd, '');
+    }
+  }
   const bodyText = `${body.join('\n').trimEnd()}\n`;
   return {
     content: `${lines.join('\n')}\n${bodyText}`,

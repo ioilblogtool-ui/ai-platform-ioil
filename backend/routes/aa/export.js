@@ -52,8 +52,9 @@ function scopeKey(scope) {
 
 function validateAskAi(body) {
   const { scope, template, question, noteIds } = body;
-  if (noteIds !== undefined && !(Array.isArray(noteIds) && noteIds.length === 0)) {
-    return { status: 400, code: 'NOTES_NOT_AVAILABLE', message: '노트 포함은 아직 지원하지 않습니다 (노트는 Sprint 9). noteIds는 빈 배열이어야 합니다.' };
+  if (noteIds !== undefined && (!Array.isArray(noteIds) || noteIds.length > 20 ||
+    noteIds.some((id) => typeof id !== 'string' || !UUID_RE.test(id)))) {
+    return { status: 400, code: 'VALIDATION_FAILED', message: 'noteIds는 노트 UUID를 최대 20개까지 담을 수 있습니다.' };
   }
   if (scope !== undefined && (typeof scope !== 'object' || scope === null || !SCOPE_TYPES.has(scope.type ?? 'project'))) {
     return { status: 400, code: 'VALIDATION_FAILED', message: SCOPE_ERRORS.scope_scope };
@@ -160,10 +161,32 @@ router.post('/', wrap(async (req, res) => {
       extra: { scopeLabel: 'Logical View 전체' }, bindingExtra: { format },
     };
   } else {
+    let notes = [];
+    const noteIds = [...new Set((body.noteIds ?? []).map((id) => id.toLowerCase()))];
+    if (noteIds.length) {
+      const { data, error } = await supabase.from('aa_notes')
+        .select('id, kind, title, body_md, target_type, target_ref')
+        .eq('project_id', req.project.id).eq('user_id', req.user.id).in('id', noteIds);
+      if (error) throw error;
+      const byId = new Map(data.map((note) => [note.id, note]));
+      if (noteIds.some((id) => !byId.has(id))) return sendError(res, 404, 'NOT_FOUND', '노트를 찾을 수 없습니다.');
+      notes = noteIds.map((id) => byId.get(id));
+      if (notes.some((note) => note.kind === 'ai_answer')) {
+        return sendError(res, 400, 'VALIDATION_FAILED', '외부 AI 답변 노트는 포함할 수 없습니다.');
+      }
+      const versionTargets = notes.filter((note) => note.target_type === 'version').map((note) => note.target_ref).filter((id) => UUID_RE.test(id));
+      if (versionTargets.length) {
+        const labels = await supabase.from('aa_architecture_versions').select('id, label')
+          .eq('project_id', req.project.id).eq('user_id', req.user.id).in('id', versionTargets);
+        if (labels.error) throw labels.error;
+        const byVersionId = new Map(labels.data.map((entry) => [entry.id, entry.label]));
+        notes = notes.map((note) => note.target_type === 'version' ? { ...note, versionLabel: byVersionId.get(note.target_ref) } : note);
+      }
+    }
     const bundleId = `bx_${crypto.randomBytes(8).toString('base64url').replace(/[-_]/g, 'x').slice(0, 10)}`;
     const built = buildAskAi({
       project: projectInfo, model, revision, basis, requirements: requirementList, format,
-      scope: body.scope, template: body.template ?? 'design-review', question: body.question ?? '', bundleId, readAt: readAt.toISOString(),
+      scope: body.scope, notes, template: body.template ?? 'design-review', question: body.question ?? '', bundleId, readAt: readAt.toISOString(),
     });
     if (built.error) {
       const status = built.error === 'scope_components' || built.error === 'scope_requirement' || built.error === 'scope_flow' ? 404 : 400;

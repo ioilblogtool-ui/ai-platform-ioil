@@ -582,3 +582,53 @@ notify pgrst, 'reload schema';
 -- P2b 적용 후 확인: docs/aa-workbench/sql/2026-11-22_p2b-check.sql
 -- 되돌리기 SQL은 schema_aa_workbench_rollback_p2b.sql (버전·버전 기준 리뷰가 0건일 때만)
 -- =====================================================================
+
+-- =====================================================================
+-- P2c (Phase 2 · Sprint 9) — 노트: aa_notes · 인덱스 2 · updated_at 트리거 · RLS · 권한
+-- Sprint 9 실행계획 Q1~Q3·U1·U1b·U3. RPC 없음(단일 행 쓰기). 하드 삭제.
+-- 다시 실행해도 안전. 권한은 이 블록이 만든 객체(aa_notes)에만 적용한다.
+-- 적용 순서(Sprint 9 U2): 리허설 SQL(되돌림) → 이 블록 → 확인 SQL.
+-- =====================================================================
+begin;
+
+create table if not exists public.aa_notes (
+  id                uuid primary key default gen_random_uuid(),
+  project_id        uuid not null,
+  user_id           uuid not null,
+  target_type       text not null check (target_type in
+                      ('project','stage','view','component','relation','flow','requirement','finding','validation','version')),
+  target_ref        text check (target_ref is null or char_length(target_ref) <= 100),
+  target_version_id uuid,
+  kind              text not null default 'memo' check (kind in ('memo','question','todo','decision','ai_answer')),
+  status            text check (status in ('open','done')),
+  title             text check (title is null or char_length(title) <= 120),
+  body_md           text not null default '' check (octet_length(body_md) <= 65536),
+  source            text check (source is null or char_length(source) <= 200),
+  pinned            boolean not null default false,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now(),
+  foreign key (project_id, user_id) references public.aa_projects(id, user_id) on delete cascade,
+  foreign key (project_id, target_version_id)
+    references public.aa_architecture_versions(project_id, id) on delete set null (target_version_id),
+  check ((kind in ('question','todo')) = (status is not null))
+);
+alter table public.aa_notes enable row level security;   -- 정책 없음 = anon/authenticated 기본 거부
+
+create index if not exists aa_notes_target_idx on public.aa_notes (project_id, target_type, target_ref);
+create index if not exists aa_notes_open_idx on public.aa_notes (project_id, kind, status) where status = 'open';
+
+create or replace trigger aa_notes_touch before update on public.aa_notes
+  for each row execute function public.aa_touch_updated_at();
+
+-- 권한: 이 블록이 만든 객체만 (P1·P2a·P2b 객체는 건드리지 않음)
+revoke all on public.aa_notes from anon, authenticated;
+grant all on public.aa_notes to service_role;
+
+commit;
+
+notify pgrst, 'reload schema';
+
+-- =====================================================================
+-- P2c 적용 후 확인: docs/aa-workbench/sql/2026-11-23_p2c-check.sql
+-- 되돌리기 SQL: supabase/schema_aa_workbench_rollback_p2c.sql (노트가 0건일 때만)
+-- =====================================================================

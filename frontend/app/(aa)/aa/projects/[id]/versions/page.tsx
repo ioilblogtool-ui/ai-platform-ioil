@@ -1,4 +1,5 @@
 'use client';
+import { TargetNotes } from '@/components/aa/studio/StudioNotes';
 
 // 버전 목록·열람·복원 (Sprint 6 Step 3 · VER-05·07 · Q6·Q8).
 // 왼쪽: 발행한 버전 목록(최신 먼저). 오른쪽: 선택한 버전의 읽기 전용 구성도·컴포넌트·관계·발행 당시 요구사항·개요.
@@ -143,7 +144,7 @@ function Versions({ id }: { id: string }) {
           </div>}
           {detailError && <Card><div role="alert" style={{ color: '#f87171' }}>{detailError}</div></Card>}
           {selectedId && !detail && !detailError && <Card><span style={muted}>버전을 불러오는 중…</span></Card>}
-          {detail && <VersionDetailView detail={detail} onRestore={() => void askRestore()}
+          {detail && <VersionDetailView key={detail.id} projectId={id} detail={detail} onRestore={() => void askRestore()}
             onCompare={(from, to) => router.push(`${base}/compare?from=${from}&to=${to}`)}
             previousId={items?.[(items?.findIndex((v) => v.id === detail.id) ?? -1) + 1]?.id ?? null} />}
         </div>
@@ -172,8 +173,9 @@ function Versions({ id }: { id: string }) {
   );
 }
 
-function VersionDetailView({ detail, onRestore, onCompare, previousId }: { detail: VersionDetail; onRestore: () => void; onCompare: (from: string, to: string) => void; previousId: string | null }) {
+function VersionDetailView({ projectId, detail, onRestore, onCompare, previousId }: { projectId: string; detail: VersionDetail; onRestore: () => void; onCompare: (from: string, to: string) => void; previousId: string | null }) {
   const [showReadme, setShowReadme] = useState(false);
+  const [componentId, setComponentId] = useState('');
   const layout = miniCanvasLayout(detail.model);
   const components = Object.values(detail.model.components).sort((a, b) => a.name.localeCompare(b.name));
   const nameOf = (cid: string) => detail.model.components[cid]?.name ?? '?';
@@ -196,6 +198,20 @@ function VersionDetailView({ detail, onRestore, onCompare, previousId }: { detai
         {detail.note && <div style={{ marginTop: 10, fontSize: 13 }} data-testid="aa-version-note">{detail.note}</div>}
         <div style={{ ...muted, marginTop: 8 }}>{parts.join(' · ') || '—'}{note ? ` (${note})` : ''}</div>
         <div style={{ ...muted, marginTop: 4, fontSize: 11.5 }}>읽기 전용 — 발행한 버전은 고칠 수 없습니다.</div>
+      </Card>
+
+      <Card>
+        <b>버전 기록 노트</b>
+        <TargetNotes projectId={projectId} targetType="version" targetRef={detail.id} />
+        {components.length > 0 && <div style={{ marginTop: 12 }}>
+          <label>발행본 컴포넌트 노트{' '}
+            <select value={componentId} onChange={(event) => setComponentId(event.target.value)}>
+              <option value="">컴포넌트 선택</option>
+              {components.map((component) => <option key={component.id} value={component.id}>{component.name}</option>)}
+            </select>
+          </label>
+          {componentId && <TargetNotes projectId={projectId} targetType="component" targetRef={componentId} targetVersionId={detail.id} />}
+        </div>}
       </Card>
 
       <Card>

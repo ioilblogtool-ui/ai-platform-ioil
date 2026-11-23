@@ -18,7 +18,7 @@ function loadMermaid() {
   return loader;
 }
 
-export default function MermaidPreview({ source, label }: { source: string; label: string }) {
+export default function MermaidPreview({ source, label, fallbackSource }: { source: string; label: string; fallbackSource?: string }) {
   const rawId = useId();
   const [state, setState] = useState<{ src: string | null; error: string | null; loading: boolean }>({ src: null, error: null, loading: true });
 
@@ -43,12 +43,12 @@ export default function MermaidPreview({ source, label }: { source: string; labe
   if (state.error) {
     return (
       <div data-testid="aa-flow-preview-error" role="alert" style={{ display: 'grid', gap: 8 }}>
-        <div style={{ color: '#f5a524', fontSize: 12.5 }}>⚠ 시퀀스를 그리지 못했습니다: {state.error}</div>
-        <pre style={{ margin: 0, padding: 10, borderRadius: 8, background: '#0e0e11', color: 'rgba(255,255,255,0.7)', fontSize: 11.5, overflow: 'auto', maxHeight: 360 }}>{source}</pre>
+        <div style={{ color: '#f5a524', fontSize: 12.5 }}>⚠ {label}을 그리지 못했습니다: {state.error}</div>
+        <pre style={{ margin: 0, padding: 10, borderRadius: 8, background: '#0e0e11', color: 'rgba(255,255,255,0.7)', fontSize: 11.5, overflow: 'auto', maxHeight: 360 }}>{fallbackSource ?? source}</pre>
       </div>
     );
   }
-  if (!state.src) return <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12.5 }}>{state.loading ? '시퀀스를 그리는 중…' : ''}</div>;
+  if (!state.src) return <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12.5 }}>{state.loading ? '다이어그램을 그리는 중…' : ''}</div>;
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={state.src} alt={label} data-testid="aa-flow-preview" style={{ maxWidth: '100%', height: 'auto', display: 'block', background: '#0e0e11', borderRadius: 8 }} />;
 }

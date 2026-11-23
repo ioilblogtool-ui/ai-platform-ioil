@@ -128,6 +128,26 @@ export function createAaClient(deps: AaClientDeps) {
     },
 
     // ── 요구사항 ──
+    listNotes(projectId: string, params?: NoteListParams) {
+      return request<{ data: ArchitectureNote[]; total: number }>(
+        `${p(projectId)}/notes${deps.buildQuery({ ...params })}`,
+      );
+    },
+    async getNoteSummary(projectId: string) {
+      return (await request<{ data: NoteSummary }>(`${p(projectId)}/notes/summary`)).data;
+    },
+    async createNote(projectId: string, note: NoteCreate) {
+      return (await request<{ data: ArchitectureNote }>(`${p(projectId)}/notes`, json('POST', note))).data;
+    },
+    async updateNote(projectId: string, noteId: string, patch: NoteUpdate) {
+      return (await request<{ data: ArchitectureNote }>(
+        `${p(projectId)}/notes/${encodeURIComponent(noteId)}`, json('PATCH', patch),
+      )).data;
+    },
+    async deleteNote(projectId: string, noteId: string) {
+      await request<void>(`${p(projectId)}/notes/${encodeURIComponent(noteId)}`, json('DELETE'));
+    },
+
     listRequirements(projectId: string, params?: ListRequirementsParams) {
       return request<{ data: Requirement[]; total: number }>(
         `${p(projectId)}/requirements${deps.buildQuery({ ...params })}`,
@@ -195,6 +215,48 @@ export function createAaClient(deps: AaClientDeps) {
     },
   };
 }
+
+export type NoteTargetType = 'project' | 'stage' | 'view' | 'component' | 'relation' | 'flow' | 'requirement' | 'finding' | 'validation' | 'version';
+export type NoteStage = 'requirements' | 'design' | 'review' | 'validation' | 'retro';
+export type NoteKind = 'memo' | 'question' | 'todo' | 'decision' | 'ai_answer';
+export type NoteStatus = 'open' | 'done';
+
+export type NoteUpdate = {
+  targetType?: NoteTargetType;
+  targetRef?: string | null;
+  targetVersionId?: string | null;
+  title?: string | null;
+  bodyMd?: string;
+  source?: string | null;
+  status?: NoteStatus;
+  pinned?: boolean;
+};
+export type NoteCreate = NoteUpdate & { targetType: NoteTargetType; kind?: NoteKind };
+export type ArchitectureNote = Required<Omit<NoteUpdate, 'status'>> & {
+  id: string;
+  kind: NoteKind;
+  status: NoteStatus | null;
+  targetLabel: string | null;
+  targetMissing: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+export type NoteCounts = { total: number; openQuestions: number; openTodos: number };
+export type NoteSummary = {
+  byTarget: (NoteCounts & { targetType: NoteTargetType; targetRef: string | null })[];
+  byStage: Record<NoteStage, NoteCounts>;
+  project: NoteCounts;
+};
+type NoteListParams = {
+  targetType?: NoteTargetType;
+  targetRef?: string;
+  targetVersionId?: string;
+  kind?: NoteKind;
+  status?: NoteStatus;
+  q?: string;
+  limit?: number;
+  offset?: number;
+};
 
 export type AaClient = ReturnType<typeof createAaClient>;
 

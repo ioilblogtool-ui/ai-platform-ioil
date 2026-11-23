@@ -19,6 +19,7 @@ import GroupNode from './GroupNode';
 import NoteNode from './NoteNode';
 import RelationEdge from './RelationEdge';
 import PropertyInspector from './PropertyInspector';
+import { StudioNotesProvider } from './StudioNotes';
 import ImportMermaidModal from './ImportMermaidModal';
 import ContainerNode from './ContainerNode';
 import ViewTabs from './ViewTabs';
@@ -86,7 +87,7 @@ function createInspectorEdits(): InspectorEdits & { clear: () => void; hasPendin
 export default function ArchitectureStudio({ projectId }: { projectId: string }) {
   return (
     <ReactFlowProvider>
-      <Studio projectId={projectId} />
+      <StudioNotesProvider key={projectId} projectId={projectId}><Studio projectId={projectId} /></StudioNotesProvider>
     </ReactFlowProvider>
   );
 }
@@ -135,7 +136,14 @@ function Studio({ projectId }: { projectId: string }) {
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); saveWithInspector(); return; }
       if (st.pendingDelete) { if (e.key === 'Escape') st.cancelDelete(); return; }
-      if (isEditable(e.target)) return;
+      if (isEditable(e.target) || modal || importOpen) return;
+      const key = e.key.toLowerCase();
+      if (mod && !e.altKey && (key === 'z' || key === 'y')) {
+        e.preventDefault();
+        edits.flush();
+        if (key === 'y' || e.shiftKey) st.redo(); else st.undo();
+        return;
+      }
       if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); st.duplicateSelection(); return; }
       if (mod || e.altKey) return;
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); st.requestDelete(); }
@@ -146,7 +154,7 @@ function Studio({ projectId }: { projectId: string }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [fitView, saveWithInspector]);
+  }, [fitView, saveWithInspector, edits, modal, importOpen]);
 
   // 저장 안 한 변경이 있으면 이탈 경고
   useEffect(() => {
@@ -286,6 +294,12 @@ function Studio({ projectId }: { projectId: string }) {
           disabled={!s.model || s.saveState === 'loading'} title="외부 AI에 붙여넣을 검토 자료 · Mermaid 내보내기">
           ⤓ 내보내기
         </button>
+        <button aria-label="되돌리기" title="되돌리기 (Ctrl/⌘+Z)" style={btn()} data-testid="aa-undo"
+          disabled={!s.past.length || s.importing || s.reloading || !!s.recovery || !!s.pendingDelete}
+          onClick={() => { edits.flush(); s.undo(); }}>↶</button>
+        <button aria-label="다시 실행" title="다시 실행 (Ctrl/⌘+Shift+Z)" style={btn()} data-testid="aa-redo"
+          disabled={!s.future.length || s.importing || s.reloading || !!s.recovery || !!s.pendingDelete}
+          onClick={() => { edits.flush(); s.redo(); }}>↷</button>
         <button onClick={() => setModal('paste')} style={btn()} data-testid="aa-paste-open" title="외부 AI 답변을 리뷰로 저장">
           답변 붙여넣기
         </button>
@@ -477,9 +491,9 @@ function Studio({ projectId }: { projectId: string }) {
         <div role="status" data-testid="aa-import-toast" style={{ position: 'fixed', left: '50%', bottom: 24, transform: 'translateX(-50%)', zIndex: 30, padding: '10px 14px', borderRadius: 10, background: '#16161a', border: '1px solid rgba(200,169,110,0.4)', color: 'rgba(255,255,255,0.9)', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
           {s.importUndo
             ? <>가져오기 완료 · 새 컴포넌트 {s.importUndo.summary.newComponents} · 기존 연결 {s.importUndo.summary.reused} · 새 관계 {s.importUndo.summary.newRelations}
-                <button style={btn()} data-testid="aa-import-undo" onClick={async () => {
-                  const r = await s.undoImport();
-                  setImportNotice(r.status === 'saved' ? '가져오기 전으로 되돌렸습니다.' : r.status === 'conflict' ? '다른 곳에서 먼저 저장되어 되돌리지 못했습니다. 위의 충돌 안내를 확인하세요.' : '되돌리지 못했습니다.');
+                <button style={btn()} data-testid="aa-import-undo" onClick={() => {
+                  edits.flush();
+                  if (s.undoImport()) setImportNotice('가져오기 전으로 되돌렸습니다.');
                 }}>가져오기 전으로 되돌리기</button>
                 <button style={btn(true)} onClick={s.dismissImportUndo}>닫기</button></>
             : <>{importNotice}<button style={btn(true)} onClick={() => setImportNotice(null)}>닫기</button></>}

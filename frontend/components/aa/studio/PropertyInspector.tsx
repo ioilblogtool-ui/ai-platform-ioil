@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import MarkdownPreview from '@/components/MarkdownPreview';
+import { StudioNotes } from './StudioNotes';
 import type { Component, PropertyDef, Relation } from '@/lib/aa/architecture-types';
 import {
   componentPlacements, componentTextError, CREDENTIALS, customKeyError, DATA_CLASSES, deploymentViewSummary, ON_FAILURE, PROTOCOLS, RELATION_MODES, RETRY_BACKOFFS, realizesTargets, relationAttrError, relationFieldError, relationSummary, runLocations, STRATEGY_MAX_BYTES,
@@ -90,6 +91,9 @@ export default function PropertyInspector({ edits }: { edits: InspectorEdits }) 
       padding: 16, overflowY: 'auto', overflowWrap: 'anywhere',
     }}>
       {body}
+      {component ? <StudioNotes targetType="component" targetRef={component.id} />
+        : relation ? <StudioNotes targetType="relation" targetRef={relation.id} />
+          : total === 0 && view ? <StudioNotes targetType="view" targetRef={view.id} /> : null}
       {total > 0 && (
         <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
           {s.selectedNodeIds.length > 0 && <button style={button} onClick={() => { edits.flush(); s.duplicateSelection(); }} title="Ctrl+D">복제</button>}

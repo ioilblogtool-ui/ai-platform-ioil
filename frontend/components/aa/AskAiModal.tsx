@@ -8,18 +8,20 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import Button from '@/components/Button';
 import MarkdownPreview from '@/components/MarkdownPreview';
-import { AaApiError, exportAskAi, getAaUserId, listRequirements } from '@/lib/aa/architecture-api';
+import { aaApi, AaApiError, exportAskAi, getAaUserId, listRequirements } from '@/lib/aa/architecture-api';
 import type { AskAiExportResult, AskAiFormat, AskAiScope, AskAiTemplate, Requirement, SensitiveScanDetails } from '@/lib/aa/architecture-types';
 import { bundleKey, rememberBundle, TEMPLATE_LABEL } from '@/lib/aa/bundle-store';
 import { basisLabel, classifyScan, recheckDecision, ruleLabel, type ExportOutcome } from '@/lib/aa/export-flow';
 import BasisSelect, { useBasisFlows, type BasisValue } from '@/components/aa/BasisSelect';
+
+import type { ArchitectureNote } from '@/lib/aa/aa-client';
 
 type ScopeType = AskAiScope['type'];
 const FORMATS: [AskAiFormat, string][] = [['ai-md', 'AI용 Markdown'], ['ai-json', 'AI용 JSON'], ['mermaid', 'Mermaid']];
 const TEMPLATES = Object.keys(TEMPLATE_LABEL) as AskAiTemplate[];
 const QUESTION_MAX = 2000;
 
-interface Settings { format: AskAiFormat; basis: BasisValue; scopeType: ScopeType; requirementId: string; flowId: string; template: AskAiTemplate; question: string }
+interface Settings { format: AskAiFormat; basis: BasisValue; scopeType: ScopeType; requirementId: string; flowId: string; template: AskAiTemplate; question: string; noteIds: string[] }
 
 // Ask AI는 05 §7.6대로 latest를 쓰지 않는다 — Draft(기본) 또는 버전
 const sourceOf = (b: BasisValue) => (b === 'draft' || b === 'latest' ? { type: 'draft' as const } : { type: 'version' as const, versionId: b });
@@ -36,7 +38,7 @@ async function requestExport(projectId: string, s: Settings, componentIds: strin
   try {
     const body = s.format === 'mermaid'
       ? { format: s.format, source: sourceOf(s.basis), acknowledgedScan: ack }
-      : { format: s.format, source: sourceOf(s.basis), scope: buildScope(s, componentIds), template: s.template, question: s.question.trim(), acknowledgedScan: ack };
+      : { format: s.format, source: sourceOf(s.basis), scope: buildScope(s, componentIds), template: s.template, question: s.question.trim(), noteIds: s.noteIds, acknowledgedScan: ack };
     return { kind: 'ok', result: await exportAskAi(projectId, body) };
   } catch (error) {
     if (error instanceof AaApiError && error.status === 422) {
@@ -59,8 +61,12 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
   onCopied?: () => void;
 }) {
   const [settings, setSettings] = useState<Settings>({
-    format: 'ai-md', basis: 'draft', scopeType: initialSelection?.length ? 'components' : 'project', requirementId: '', flowId: '', template: 'design-review', question: '',
+    format: 'ai-md', basis: 'draft', scopeType: initialSelection?.length ? 'components' : 'project', requirementId: '', flowId: '', template: 'design-review', question: '', noteIds: [],
   });
+  const [notes, setNotes] = useState<ArchitectureNote[]>([]);
+  const [noteTotal, setNoteTotal] = useState(0);
+  const [noteError, setNoteError] = useState('');
+  const [noteLimit, setNoteLimit] = useState(100);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [selectedComponentIds] = useState<string[]>(() => initialSelection ?? []);
   const [preview, setPreview] = useState<AskAiExportResult | null>(null);
@@ -81,6 +87,28 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
   useEffect(() => {
     listRequirements(projectId, { status: 'active', limit: 200 }).then((r) => setRequirements(r.data ?? [])).catch(() => setRequirements([]));
   }, [projectId]);
+
+  useEffect(() => {
+    let active = true;
+    aaApi.listNotes(projectId, { offset: noteLimit - 100, limit: 100 }).then(({ data, total }) => {
+      if (!active) return;
+      setNotes((previous) => noteLimit === 100 ? data : [...new Map([...previous, ...data].map((note) => [note.id, note])).values()]);
+      setNoteTotal(total);
+      setNoteError('');
+    }).catch(() => { if (active) setNoteError('노트 목록을 불러오지 못했습니다.'); });
+    return () => { active = false; };
+  }, [projectId, noteLimit]);
+
+  function notePriority(note: ArchitectureNote) {
+    const { targetType, targetRef } = note;
+    if (settings.scopeType === 'project' && !['project', 'stage'].includes(targetType)) return 0;
+    if (settings.scopeType === 'components' && targetType === 'component' && selectedComponentIds.includes(targetRef ?? '')) return 0;
+    if (settings.scopeType === 'view' && targetType === 'view' && targetRef === 'view_logical') return 0;
+    if (settings.scopeType === 'requirement' && targetType === 'requirement' && targetRef === settings.requirementId) return 0;
+    if (settings.scopeType === 'flow' && (targetType === 'flow' && targetRef === settings.flowId ||
+      targetType === 'component' && flows?.find((flow) => flow.id === settings.flowId)?.participantIds.includes(targetRef ?? ''))) return 0;
+    return ['project', 'stage'].includes(targetType) ? 1 : 2;
+  }
 
   const show = useCallback((outcome: ExportOutcome<AskAiExportResult>, usedAck: string | null) => {
     if (outcome.kind === 'ok') { setPreview(outcome.result); setScan(null); setAck(usedAck); setError(null); return; }
@@ -222,6 +250,22 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
                 )}
                 {!selectedComponentIds.length && <Hint>컴포넌트 범위는 Studio에서 노드를 선택하고 열면 쓸 수 있습니다.</Hint>}
               </Field>
+              <Field label="노트 포함">
+                <Hint>선택한 노트만 포함합니다. {settings.noteIds.length}/20</Hint>
+                {noteError && <Hint warn>{noteError}</Hint>}
+                <div style={{ maxHeight: 160, overflow: 'auto' }}>
+                  {[...notes].sort((a, b) => notePriority(a) - notePriority(b)).map((note) => {
+                    const checked = settings.noteIds.includes(note.id);
+                    return <label key={note.id} style={radio}>
+                      <input type="checkbox" checked={checked}
+                        disabled={note.kind === 'ai_answer' || (!checked && settings.noteIds.length >= 20)}
+                        onChange={() => change({ noteIds: checked ? settings.noteIds.filter((id) => id !== note.id) : [...settings.noteIds, note.id] })} />
+                      <span>{note.title || note.bodyMd.slice(0, 60) || '노트'}{note.targetLabel ? ' · ' + note.targetLabel : ''}{note.kind === 'ai_answer' ? ' · 외부 AI 답변은 포함할 수 없음' : ''}</span>
+                    </label>;
+                  })}
+                </div>
+                {noteTotal > noteLimit && <Button size="sm" onClick={() => setNoteLimit((value) => value + 100)}>노트 더 보기</Button>}
+              </Field>
               <Field label="물어볼 것">
                 <select value={settings.template} onChange={(e) => change({ template: e.target.value as AskAiTemplate })} data-testid="aa-askai-template" style={input}>
                   {TEMPLATES.map((t) => <option key={t} value={t}>{TEMPLATE_LABEL[t]}</option>)}
@@ -232,7 +276,7 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
                 {needsQuestion && <Hint warn>직접 입력은 질문이 필요합니다.</Hint>}
               </Field>
             </>}
-            <Hint>내부 ID·좌표·노트는 넣지 않습니다. 컴포넌트는 C1·C2… 별칭으로 표시합니다.</Hint>
+            <Hint>내부 ID·좌표는 넣지 않습니다. 컴포넌트는 C1·C2… 별칭으로 표시합니다.</Hint>
           </div>
 
           {/* 미리보기 */}

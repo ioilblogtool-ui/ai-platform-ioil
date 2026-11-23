@@ -1,4 +1,5 @@
 'use client';
+import { TargetNotes } from '@/components/aa/studio/StudioNotes';
 
 import { use, useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
@@ -231,6 +232,7 @@ function ProjectRequirements({ id }: { id: string }) {
         {editor !== undefined && <RequirementForm key={editor?.id ?? 'new'} item={editor} busy={busy} onSubmit={save}
           model={model} measurement={measurement} onMeasurement={setMeasurement}
           onCancel={() => { setEditor(undefined); setActionError(''); }} />}
+        {editor && <Card><TargetNotes projectId={id} targetType="requirement" targetRef={editor.id} /></Card>}
         {confirmDelete && (
           <Card><div style={rowStyle}>
             <span>`{confirmDelete.code}` 요구사항을 삭제할까요?</span>

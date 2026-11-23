@@ -1,4 +1,5 @@
 'use client';
+import { StageNotesBoard } from '@/components/aa/studio/StudioNotes';
 
 // SCR-04 Project Overview (Sprint 3 Step 4): 프로젝트 개요(README) · 현황 · 읽기 전용 미니 캔버스.
 // 개요 저장은 Studio 자동 저장과 별개다 (PATCH readmeMd). 미니 캔버스는 Draft를 읽기만 한다.
@@ -65,6 +66,7 @@ function ProjectOverview({ id }: { id: string }) {
           <Button onClick={() => { setProject({ status: 'loading' }); setDraft({ status: 'loading' }); setRefresh((v) => v + 1); }}>다시 시도</Button>
           <Button onClick={() => router.push('/aa/projects')}>목록으로</Button>
         </div></Card>
+
       </main>
     </>;
   }
@@ -96,6 +98,7 @@ function ProjectOverview({ id }: { id: string }) {
               draft={draft.status === 'ok' ? draft.data : null} requirements={requirements} />
           </Card>
         </div>
+        {project.status === 'ok' && <Card><StageNotesBoard projectId={id} /></Card>}
       </main>
       {showReadme && <ReadmeExportModal projectId={id} projectName={name} onClose={() => setShowReadme(false)} />}
     </>

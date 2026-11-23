@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
-import { marked } from 'marked';
+import { marked, type Token, type Tokens } from 'marked';
+import MermaidPreview from '@/components/aa/studio/MermaidPreview';
+import { sanitizeBody } from '@/lib/aa/flow-mermaid';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -34,27 +36,62 @@ const MD_STYLES = `
 interface Props {
   content: string;
   style?: React.CSSProperties;
+  mermaid?: boolean;
 }
 
-export default function MarkdownPreview({ content, style }: Props) {
-  const [html, setHtml] = useState<string | null>(null);
+type PreviewBlock = { html: string } | { diagram: string; original: string; error?: string };
+const MERMAID_MAX_BYTES = 32768;
+
+function previewBlocks(content: string, enabled: boolean): PreviewBlock[] {
+  const tokens = marked.lexer(content);
+  const blocks: PreviewBlock[] = [];
+  let markdown: Token[] = [];
+  function flush() {
+    if (!markdown.length) return;
+    const html = marked.parser(Object.assign(markdown, { links: tokens.links }));
+    blocks.push({ html: DOMPurify.sanitize(html, { USE_PROFILES: { html: true } }) });
+    markdown = [];
+  }
+  for (const token of tokens) {
+    const code = token.type === 'code' ? token as Tokens.Code : null;
+    if (!enabled || code?.lang?.trim().toLowerCase() !== 'mermaid') {
+      markdown.push(token);
+      continue;
+    }
+    flush();
+    const original = code.text;
+    if (new TextEncoder().encode(original).length > MERMAID_MAX_BYTES) {
+      blocks.push({ diagram: '', original, error: 'Mermaid 블록은 32KB 이하여야 합니다.' });
+    } else {
+      blocks.push({ diagram: sanitizeBody(original).text, original });
+    }
+  }
+  flush();
+  return blocks;
+}
+
+export default function MarkdownPreview({ content, style, mermaid = true }: Props) {
+  const [blocks, setBlocks] = useState<PreviewBlock[] | null>(null);
 
   useEffect(() => {
     try {
-      const parsed = marked.parse(content, { async: false });
-      setHtml(DOMPurify.sanitize(parsed, { USE_PROFILES: { html: true } }));
+      setBlocks(previewBlocks(content, mermaid));
     } catch {
-      setHtml(null);
+      setBlocks(null);
     }
-  }, [content]);
+  }, [content, mermaid]);
 
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: MD_STYLES }} />
-      {html === null ? (
+      {blocks === null ? (
         <div className="md-preview" style={style}><pre>{content}</pre></div>
       ) : (
-        <div className="md-preview" style={style} dangerouslySetInnerHTML={{ __html: html }} />
+        <div className="md-preview" style={style}>{blocks.map((block, index) => {
+          if ('html' in block) return <div key={index} dangerouslySetInnerHTML={{ __html: block.html }} />;
+          if (block.error) return <div key={index} role="alert"><div>{block.error}</div><pre>{block.original}</pre></div>;
+          return <MermaidPreview key={index} source={block.diagram} fallbackSource={block.original} label="Mermaid 다이어그램" />;
+        })}</div>
       )}
     </>
   );
