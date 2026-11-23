@@ -31,16 +31,20 @@ export default function ViewTabs({ edits }: { edits: InspectorEdits }) {
   return (
     <div style={{ height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px', borderBottom: '1px solid rgba(255,255,255,0.07)', background: '#09090b', position: 'relative' }}
       data-testid="aa-view-tabs">
-      <button style={tab(current?.kind === 'logical')} onClick={() => { edits.flush(); s.setView('view_logical'); }} data-testid="aa-view-tab-logical">Logical</button>
+      <button style={tab(s.panel === 'canvas' && current?.kind === 'logical')} onClick={() => { edits.flush(); s.setView('view_logical'); }} data-testid="aa-view-tab-logical">Logical</button>
       {deps.map((v) => (
-        <button key={v.id} style={tab(v.id === s.viewId)} onClick={() => { edits.flush(); s.setView(v.id); }} data-testid="aa-view-tab-deployment" aria-label={`배치안 ${v.variant}`}>
+        <button key={v.id} style={tab(s.panel === 'canvas' && v.id === s.viewId)} onClick={() => { edits.flush(); s.setView(v.id); }} data-testid="aa-view-tab-deployment" aria-label={`배치안 ${v.variant}`}>
           ▦ {v.variant}
         </button>
       ))}
       <button style={tab(false)} disabled={locked} onClick={() => (mode ? close() : open('menu'))} data-testid="aa-view-menu" aria-expanded={Boolean(mode)}>
         Deployment ▾
       </button>
-      <span style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.35)' }}>{inDeployment ? '배치안 — Logical 컴포넌트는 공유, 실행 위치만 다름' : ''}</span>
+      {/* Sprint 8 (D-25): API Flow는 고정 UI 탭 — views[]에 저장하지 않는다 */}
+      <button style={tab(s.panel === 'flows')} onClick={() => { edits.flush(); s.openFlows(); }} data-testid="aa-view-tab-flows">
+        API Flow{Object.keys(s.model.flows ?? {}).length ? ` · ${Object.keys(s.model.flows ?? {}).length}` : ''}
+      </button>
+      <span style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.35)' }}>{s.panel === 'canvas' && inDeployment ? '배치안 — Logical 컴포넌트는 공유, 실행 위치만 다름' : ''}</span>
 
       {mode && (
         <div role="dialog" aria-label="배치안 메뉴" data-testid="aa-view-menu-panel" onKeyDown={(e) => { if (e.key === 'Escape') close(); e.stopPropagation(); }}

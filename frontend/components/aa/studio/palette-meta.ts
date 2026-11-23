@@ -39,6 +39,8 @@ export const TYPE_FALLBACK: Record<string, { icon: string; category: string }> =
 };
 
 export const DND_MIME = 'application/aa-type';
+/** Sprint 8 (VIEW-05): 다른 View의 컴포넌트를 참조 노드로 끌어 놓을 때 */
+export const REF_MIME = 'application/aa-ref';
 
 export type PaletteItem = { type: string; label: string; icon: string; category: string; nodeKind: string };
 

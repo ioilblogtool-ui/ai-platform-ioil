@@ -9,9 +9,9 @@ import MarkdownPreview from '@/components/MarkdownPreview';
 import { AaApiError, exportReadme } from '@/lib/aa/architecture-api';
 import type { ReadmeExportResult, ReadmeSections, SensitiveScanDetails } from '@/lib/aa/architecture-types';
 import { basisLabel, classifyScan, recheckDecision, ruleLabel, type ExportOutcome } from '@/lib/aa/export-flow';
-import BasisSelect, { toSource, type BasisValue } from '@/components/aa/BasisSelect';
+import BasisSelect, { toSource, useBasisFlows, type BasisValue } from '@/components/aa/BasisSelect';
 
-const SECTION_LABELS: [keyof ReadmeSections, string][] = [
+const SECTION_LABELS: [Exclude<keyof ReadmeSections, 'apiFlows'>, string][] = [
   ['overview', '프로젝트 개요'], ['logicalDiagram', 'Logical 구성도 (Mermaid)'], ['nfr', '비기능 요구사항 (NFR)'],
   // Sprint 7: 배치안이 있을 때만 내용이 생긴다 (기본 꺼짐)
   ['deployment', '배포 구성 (배치안)'], ['deployStrategy', '배포 전략'],
@@ -62,7 +62,16 @@ export default function ReadmeExportModal({ projectId, projectName, onClose }: {
 
   useEffect(() => { void load(sections, null, basis); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  function toggle(key: keyof ReadmeSections) {
+  const flows = useBasisFlows(projectId, basis);
+  function toggleFlow(flowId: string) {
+    const cur = sections.apiFlows ?? [];
+    const next = { ...sections, apiFlows: cur.includes(flowId) ? cur.filter((x) => x !== flowId) : [...cur, flowId] };
+    setSections(next);
+    setNotice(null);
+    void load(next, null, basis);
+  }
+
+  function toggle(key: Exclude<keyof ReadmeSections, 'apiFlows'>) {
     const next = { ...sections, [key]: !sections[key] };
     setSections(next);
     setNotice(null);
@@ -126,13 +135,23 @@ export default function ReadmeExportModal({ projectId, projectName, onClose }: {
         <div style={{ padding: '12px 20px', display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 13 }}>
           <span style={{ color: 'rgba(255,255,255,0.5)' }}>기준</span>
           <BasisSelect projectId={projectId} value={basis} allowLatest testId="aa-readme-source"
-            onChange={(v) => { setBasis(v); setNotice(null); void load(sections, null, v); }} />
+            onChange={(v) => { const next = { ...sections, apiFlows: [] }; setSections(next); setBasis(v); setNotice(null); void load(next, null, v); }} />
           <span style={{ color: 'rgba(255,255,255,0.5)' }}>포함할 구역</span>
           {SECTION_LABELS.map(([key, label]) => (
             <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
               <input type="checkbox" checked={sections[key]} onChange={() => toggle(key)} data-testid={`aa-readme-section-${key}`} />{label}
             </label>
           ))}
+          {flows && flows.length > 0 && (
+            <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }} data-testid="aa-readme-flows">
+              <span style={{ color: 'rgba(255,255,255,0.5)' }}>API Flow</span>
+              {flows.map((f) => (
+                <label key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={(sections.apiFlows ?? []).includes(f.id)} onChange={() => toggleFlow(f.id)} data-testid="aa-readme-flow" />{f.name}
+                </label>
+              ))}
+            </span>
+          )}
           <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>제목·아키텍처 요약은 항상 포함 · 노트·비밀값은 넣지 않습니다</span>
         </div>
 

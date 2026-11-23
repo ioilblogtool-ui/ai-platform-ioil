@@ -13,6 +13,7 @@ export const {
   updateProject: updateAaProject,
   deleteProject: deleteAaProject,
   listRequirements,
+  getRequirement,
   createRequirement,
   updateRequirement,
   deleteRequirement,

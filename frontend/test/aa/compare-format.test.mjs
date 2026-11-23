@@ -71,3 +71,28 @@ describe('compare-format', () => {
     assert.deepEqual(summaryParts(s), ['배포 전략 2']);
   });
 });
+
+describe('compare-format · Sprint 8', () => {
+  it('groups flow changes, flags security changes and words retry/auth objects', () => {
+    const groups = groupChanges([
+      { kind: 'relation.modified', relationId: 'r', relationType: 'calls', from: 'API', to: 'DB', fromId: 'a', toId: 'b', security: true,
+        fields: [{ path: 'credential', before: 'jwt-bearer', after: 'service-role' }, { path: 'retry', before: { max: 1, backoff: 'fixed' }, after: null }] },
+      { kind: 'flow.added', flowId: 'f', name: '리포트 목록 조회', endpoint: 'GET /api/my-ai/reports' },
+      { kind: 'flow.modified', flowId: 'f', name: '리포트 목록 조회', fields: [{ path: 'auth', before: { tokenIssuer: 'Auth' }, after: {} }] },
+      { kind: 'flow.mermaid', flowId: 'f', name: '리포트 목록 조회' },
+      { kind: 'flow.requirements', flowId: 'f', name: '리포트 목록 조회', added: ['NFR-001'], removed: [] },
+    ], []);
+    assert.deepEqual(groups.map((g) => g.key), ['relation', 'flow', 'links']);
+    assert.equal(groups[0].items[0].text, '🛡 보안 수정 · API → DB');
+    assert.equal(groups[0].items[0].detail, '자격증명 유형: jwt-bearer → service-role / retry: 1회 fixed → 없음');
+    assert.deepEqual(groups[1].items.map((i) => i.text), ['추가 · 리포트 목록 조회 (GET /api/my-ai/reports)', '수정 · 리포트 목록 조회', '표현 변경 · 리포트 목록 조회']);
+    assert.equal(groups[1].items[1].detail, '인증 역할: 발급 Auth → 없음');
+    assert.equal(groups[2].items[0].detail, '+ NFR-001');
+  });
+
+  it('summary lists API Flow counts', () => {
+    const s = { hashVersion: 1, componentsAdded: 0, componentsRemoved: 0, componentsModified: 0, requirementLinksChanged: 0, relationsAdded: 0, relationsRemoved: 0,
+      relationsModified: 0, nodesReparented: 0, viewChanges: 0, layoutOnly: 0, requirementsChanged: 0, flowsAdded: 1, flowsModified: 2 };
+    assert.deepEqual(summaryParts(s), ['+ API Flow 1', '~ API Flow 2']);
+  });
+});

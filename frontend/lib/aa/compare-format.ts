@@ -3,13 +3,14 @@
 import type { ArchitectureModel, CompareChange, CompareViewMeta, FieldChange } from './architecture-types';
 
 export type Tone = 'added' | 'removed' | 'modified';
-export type GroupKey = 'component' | 'relation' | 'links' | 'view' | 'requirement' | 'layout';
+export type GroupKey = 'component' | 'relation' | 'flow' | 'links' | 'view' | 'requirement' | 'layout';
 export interface CompareItem { change: CompareChange; text: string; detail?: string; tone: Tone; viewId?: string }
 export interface CompareGroup { key: GroupKey; title: string; items: CompareItem[] }
 
 const GROUPS: { key: GroupKey; title: string }[] = [
   { key: 'component', title: '컴포넌트' },
   { key: 'relation', title: '관계' },
+  { key: 'flow', title: 'API Flow' },
   { key: 'links', title: '요구사항 연결' },
   { key: 'view', title: 'View · 배치안' },
   { key: 'requirement', title: '요구사항 (발행 당시 값)' },
@@ -19,6 +20,8 @@ const GROUPS: { key: GroupKey; title: string }[] = [
 const FIELD_LABEL: Record<string, string> = {
   name: '이름', type: '타입', technology: '기술', description: '설명', tags: '태그',
   protocol: '프로토콜', mode: '방식', label: '설명', from: '출발', to: '도착',
+  timeoutMs: 'timeout(ms)', retry: 'retry', onFailure: '실패 시 동작', credential: '자격증명 유형', dataClass: '데이터 등급',
+  endpoint: '엔드포인트', participants: '참여', outcomes: '결과', auth: '인증 역할',
   title: '제목', target: '목표', metric: '측정', priority: '우선순위', kind: '종류', category: '분류', code: '코드',
 };
 
@@ -31,7 +34,13 @@ function fieldName(path: string) {
 function show(v: unknown): string {
   if (v === null || v === undefined || v === '') return '없음';
   if (Array.isArray(v)) return v.length ? v.join(', ') : '없음';
-  if (typeof v === 'object') return JSON.stringify(v);
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if ('max' in o && 'backoff' in o) return `${o.max}회 ${o.backoff}`;   // retry
+    const ROLE: Record<string, string> = { tokenIssuer: '발급', tokenVerifier: '검증', dataAccessor: 'DB 접근' };
+    const entries = Object.entries(o);
+    return entries.length ? entries.map(([k, x]) => `${ROLE[k] ?? k} ${String(x)}`).join(', ') : '없음';
+  }
   const s = String(v);
   return s.length > 60 ? `${s.slice(0, 59)}…` : s;
 }
@@ -64,7 +73,17 @@ function describe(c: CompareChange, viewName: (id: string) => string): { group: 
     case 'relation.removed':
       return { group: 'relation', item: { change: c, tone: 'removed', text: `삭제 · ${c.from} → ${c.to}${c.relationType === 'realizes' ? ' (구현)' : c.protocol ? ` (${c.protocol})` : ''}` } };
     case 'relation.modified':
-      return { group: 'relation', item: { change: c, tone: 'modified', text: `수정 · ${c.from} → ${c.to}`, detail: c.fields.map(fieldText).join(' / ') } };
+      return { group: 'relation', item: { change: c, tone: 'modified', text: `${c.security ? '🛡 보안 ' : ''}수정 · ${c.from} → ${c.to}`, detail: c.fields.map(fieldText).join(' / ') } };
+    case 'flow.added':
+      return { group: 'flow', item: { change: c, tone: 'added', text: `추가 · ${c.name}${c.endpoint ? ` (${c.endpoint})` : ''}` } };
+    case 'flow.removed':
+      return { group: 'flow', item: { change: c, tone: 'removed', text: `삭제 · ${c.name}${c.endpoint ? ` (${c.endpoint})` : ''}` } };
+    case 'flow.modified':
+      return { group: 'flow', item: { change: c, tone: 'modified', text: `수정 · ${c.name}`, detail: c.fields.map(fieldText).join(' / ') } };
+    case 'flow.requirements':
+      return { group: 'links', item: { change: c, tone: 'modified', text: `흐름 ${c.name}`, detail: linkText(c.added, c.removed) } };
+    case 'flow.mermaid':
+      return { group: 'flow', item: { change: c, tone: 'modified', text: `표현 변경 · ${c.name}`, detail: '시퀀스 본문만 바뀜' } };
     case 'relation.requirements':
       return { group: 'links', item: { change: c, tone: 'modified', text: `${c.from} → ${c.to}`, detail: linkText(c.added, c.removed) } };
     case 'view.added':

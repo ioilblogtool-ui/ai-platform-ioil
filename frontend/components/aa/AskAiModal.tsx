@@ -12,14 +12,14 @@ import { AaApiError, exportAskAi, getAaUserId, listRequirements } from '@/lib/aa
 import type { AskAiExportResult, AskAiFormat, AskAiScope, AskAiTemplate, Requirement, SensitiveScanDetails } from '@/lib/aa/architecture-types';
 import { bundleKey, rememberBundle, TEMPLATE_LABEL } from '@/lib/aa/bundle-store';
 import { basisLabel, classifyScan, recheckDecision, ruleLabel, type ExportOutcome } from '@/lib/aa/export-flow';
-import BasisSelect, { type BasisValue } from '@/components/aa/BasisSelect';
+import BasisSelect, { useBasisFlows, type BasisValue } from '@/components/aa/BasisSelect';
 
 type ScopeType = AskAiScope['type'];
 const FORMATS: [AskAiFormat, string][] = [['ai-md', 'AI용 Markdown'], ['ai-json', 'AI용 JSON'], ['mermaid', 'Mermaid']];
 const TEMPLATES = Object.keys(TEMPLATE_LABEL) as AskAiTemplate[];
 const QUESTION_MAX = 2000;
 
-interface Settings { format: AskAiFormat; basis: BasisValue; scopeType: ScopeType; requirementId: string; template: AskAiTemplate; question: string }
+interface Settings { format: AskAiFormat; basis: BasisValue; scopeType: ScopeType; requirementId: string; flowId: string; template: AskAiTemplate; question: string }
 
 // Ask AI는 05 §7.6대로 latest를 쓰지 않는다 — Draft(기본) 또는 버전
 const sourceOf = (b: BasisValue) => (b === 'draft' || b === 'latest' ? { type: 'draft' as const } : { type: 'version' as const, versionId: b });
@@ -28,6 +28,7 @@ function buildScope(s: Settings, componentIds: string[]): AskAiScope {
   if (s.scopeType === 'view') return { type: 'view', viewId: 'view_logical' };
   if (s.scopeType === 'components') return { type: 'components', componentIds };
   if (s.scopeType === 'requirement') return { type: 'requirement', requirementId: s.requirementId };
+  if (s.scopeType === 'flow') return { type: 'flow', flowId: s.flowId };
   return { type: 'project' };
 }
 
@@ -58,7 +59,7 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
   onCopied?: () => void;
 }) {
   const [settings, setSettings] = useState<Settings>({
-    format: 'ai-md', basis: 'draft', scopeType: initialSelection?.length ? 'components' : 'project', requirementId: '', template: 'design-review', question: '',
+    format: 'ai-md', basis: 'draft', scopeType: initialSelection?.length ? 'components' : 'project', requirementId: '', flowId: '', template: 'design-review', question: '',
   });
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [selectedComponentIds] = useState<string[]>(() => initialSelection ?? []);
@@ -73,7 +74,8 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
   const isMermaid = settings.format === 'mermaid';
   const questionTooLong = settings.question.trim().length > QUESTION_MAX;
   const needsQuestion = !isMermaid && settings.template === 'custom' && !settings.question.trim();
-  const needsRequirement = !isMermaid && settings.scopeType === 'requirement' && !settings.requirementId;
+  const needsRequirement = (!isMermaid && settings.scopeType === 'requirement' && !settings.requirementId) || (!isMermaid && settings.scopeType === 'flow' && !settings.flowId);
+  const flows = useBasisFlows(projectId, settings.basis === 'latest' ? 'draft' : settings.basis);
   const invalid = questionTooLong || needsQuestion || needsRequirement;
 
   useEffect(() => {
@@ -170,6 +172,7 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
     ['view', 'Logical View', true],
     ['components', `선택한 컴포넌트와 이웃${selectedComponentIds.length ? ` (${selectedComponentIds.length})` : ''}`, selectedComponentIds.length > 0],
     ['requirement', '요구사항 하나', requirements.length > 0],
+    ['flow', 'API Flow 하나', Boolean(flows?.length)],
   ];
 
   return (
@@ -209,6 +212,12 @@ export default function AskAiModal({ projectId, projectName, selectedComponentId
                   <select value={settings.requirementId} onChange={(e) => change({ requirementId: e.target.value })} data-testid="aa-askai-requirement" style={input}>
                     <option value="">요구사항 선택…</option>
                     {requirements.map((r) => <option key={r.id} value={r.id}>{r.code} · {r.title}</option>)}
+                  </select>
+                )}
+                {settings.scopeType === 'flow' && (
+                  <select value={settings.flowId} onChange={(e) => change({ flowId: e.target.value })} data-testid="aa-askai-flow" style={input}>
+                    <option value="">흐름 선택…</option>
+                    {(flows ?? []).map((f) => <option key={f.id} value={f.id}>{f.name}{f.endpoint ? ` · ${f.endpoint.method} ${f.endpoint.path}` : ''}</option>)}
                   </select>
                 )}
                 {!selectedComponentIds.length && <Hint>컴포넌트 범위는 Studio에서 노드를 선택하고 열면 쓸 수 있습니다.</Hint>}

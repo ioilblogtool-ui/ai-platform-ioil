@@ -133,6 +133,10 @@ export function createAaClient(deps: AaClientDeps) {
         `${p(projectId)}/requirements${deps.buildQuery({ ...params })}`,
       );
     },
+    /** 요구사항 하나 (후속 수정: Trace가 목록 200건 한도와 무관하게 연다). 없으면 404 */
+    async getRequirement(projectId: string, id: string) {
+      return (await request<{ data: Requirement }>(`${p(projectId)}/requirements/${encodeURIComponent(id)}`)).data;
+    },
     async createRequirement(projectId: string, input: RequirementCreate) {
       return (await request<{ data: Requirement }>(`${p(projectId)}/requirements`, json('POST', input))).data;
     },

@@ -7,6 +7,11 @@ import { useRouter } from 'next/navigation';
 import { ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, useReactFlow, type Node } from '@xyflow/react';
 import { useStudio, type SaveState } from '@/lib/aa/studio-store';
 import { toFlow } from '@/lib/aa/graph-mapper';
+import { referenceCandidates } from '@/lib/aa/model-ops';
+import { flowHighlight } from '@/lib/aa/flow-ops';
+import FlowPanel from './FlowPanel';
+import { edgeMarks, resolveBaseView } from '@/lib/aa/boundary';
+import BoundaryBar, { useBoundaryPrefs } from './BoundaryBar';
 import { shouldWarnOnLeave } from '@/lib/aa/autosave';
 import { modelByteSize } from '@/lib/aa/architecture-api';
 import ComponentNode from './ComponentNode';
@@ -30,7 +35,7 @@ function selectedComponentIds(model: ArchitectureModel | null, viewId: string, n
   return [...new Set(view.nodes.filter((n) => picked.has(n.id) && n.kind === 'component' && n.componentId).map((n) => n.componentId!))];
 }
 import type { InspectorEdits } from './SchemaForm';
-import { CATEGORY_COLOR, DND_MIME, paletteItems, type PaletteItem } from './palette-meta';
+import { CATEGORY_COLOR, DND_MIME, paletteItems, REF_MIME, type PaletteItem } from './palette-meta';
 
 // React Flow가 렌더마다 새로 만들지 않도록 컴포넌트 밖에 둔다
 const nodeTypes = { component: ComponentNode, group: GroupNode, note: NoteNode, container: ContainerNode };
@@ -157,7 +162,28 @@ function Studio({ projectId }: { projectId: string }) {
   const selected = useMemo(() => new Set(s.selectedNodeIds), [s.selectedNodeIds]);
   // V11 경고(배치안의 Process 위치)를 이 View의 노드에 표시 (Sprint 7)
   const warnMap = useMemo(() => new Map(s.placementWarnings.filter((w) => w.viewId === s.viewId && w.nodeId).map((w) => [w.nodeId!, w.message])), [s.placementWarnings, s.viewId]);
-  const flow = useMemo(() => (s.model ? toFlow(s.model, s.viewId, selected, warnMap) : { nodes: [], edges: [] }), [s.model, s.viewId, selected, warnMap]);
+  // Sprint 8 (REL-07): 경계·데이터 표시. Logical은 경계 기준 배치안으로 추론
+  const boundaryPrefs = useBoundaryPrefs(s.projectId);
+  const baseViewId = s.model ? resolveBaseView(s.model, boundaryPrefs.baseViewId) : null;
+  const marks = useMemo(() => (s.model && boundaryPrefs.show ? edgeMarks(s.model, s.viewId, baseViewId) : new Map()), [s.model, s.viewId, baseViewId, boundaryPrefs.show]);
+  // Sprint 8 (FLW-06): 흐름을 고른 채 Logical이면 참여 노드·그 사이 calls만 강조
+  const highlight = useMemo(() => (s.model && view?.kind === 'logical' ? flowHighlight(s.model, s.highlightFlowId) : null), [s.model, view?.kind, s.highlightFlowId]);
+  const flow = useMemo(() => (s.model ? toFlow(s.model, s.viewId, selected, warnMap, marks, highlight) : { nodes: [], edges: [] }), [s.model, s.viewId, selected, warnMap, marks, highlight]);
+
+  // Sprint 8: Trace에서 넘어올 때 ?flow=<id>(빈 값이면 흐름 탭) / ?focus=<componentId> — 처음 모델이 왔을 때 한 번
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (!s.model || deepLinked.current) return;
+    deepLinked.current = true;
+    const q = new URLSearchParams(window.location.search);
+    if (q.has('flow')) useStudio.getState().openFlows(q.get('flow') || null);
+    const focus = q.get('focus');
+    if (focus) {
+      const target = s.model.views.find((v) => v.id === 'view_logical' && v.nodes.some((n) => n.componentId === focus)) ?? s.model.views.find((v) => v.nodes.some((n) => n.componentId === focus));
+      const node = target?.nodes.find((n) => n.componentId === focus);
+      if (target && node) useStudio.getState().focusNode(target.id, node.id);
+    }
+  }, [s.model]);
 
   // 활성 View가 모델에서 사라지면(복원·다른 탭) Logical로 (Sprint 7 Q11)
   useEffect(() => {
@@ -173,6 +199,12 @@ function Studio({ projectId }: { projectId: string }) {
   const edges = useMemo(() => flow.edges.map((e) => ({ ...e, selected: s.selectedEdgeIds.includes(e.id) })), [flow.edges, s.selectedEdgeIds]);
   const bytes = useMemo(() => (s.model ? modelByteSize(s.model) : 0), [s.model]);
   const items = useMemo(() => paletteItems(s.registry, view?.kind ?? 'logical', query), [s.registry, view?.kind, query]);
+  // Sprint 8 (VIEW-05): 다른 View의 컴포넌트 (검색어로도 거름)
+  const refs = useMemo(() => {
+    const all = s.model ? referenceCandidates(s.model, s.viewId, s.registry) : [];
+    const q = query.trim().toLowerCase();
+    return q ? all.filter((r) => r.name.toLowerCase().includes(q) || r.type.toLowerCase().includes(q)) : all;
+  }, [s.model, s.viewId, s.registry, query]);
 
   const addItem = useCallback((item: PaletteItem, pos: { x: number; y: number }) => {
     if (item.nodeKind === 'group') s.addGroup(pos);
@@ -187,8 +219,19 @@ function Studio({ projectId }: { projectId: string }) {
     addItem(item, pos);
   }, [addItem, screenToFlowPosition]);
 
+  const addRefAtCenter = useCallback((componentId: string) => {
+    const r = canvasRef.current?.getBoundingClientRect();
+    const pos = r ? screenToFlowPosition({ x: r.left + r.width / 2 - DROP_OFFSET.component.x, y: r.top + r.height / 2 - DROP_OFFSET.component.y }) : { x: 0, y: 0 };
+    useStudio.getState().addReference(componentId, pos);
+  }, [screenToFlowPosition]);
+
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    const ref = e.dataTransfer.getData(REF_MIME);
+    if (ref) {
+      useStudio.getState().addReference(ref, screenToFlowPosition({ x: e.clientX - DROP_OFFSET.component.x, y: e.clientY - DROP_OFFSET.component.y }));
+      return;
+    }
     const type = e.dataTransfer.getData(DND_MIME);
     const item = paletteItems(useStudio.getState().registry, view?.kind ?? 'logical').find((i) => i.type === type);
     if (!item) return;
@@ -274,6 +317,14 @@ function Studio({ projectId }: { projectId: string }) {
         <button onClick={() => setInspectorOpen((v) => !v)} title="Inspector 접기·펴기 (])" style={btn(true)}>◧</button>
       </div>
       <ViewTabs edits={edits} />
+      {s.model && s.panel === 'canvas' && <BoundaryBar model={s.model} viewId={s.viewId} baseViewId={baseViewId} prefs={boundaryPrefs} />}
+      {highlight && s.panel === 'canvas' && s.model?.flows?.[s.highlightFlowId!] && (
+        <div role="status" data-testid="aa-flow-highlight" style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '4px 14px', fontSize: 12, color: '#e9d6b0', background: 'rgba(200,169,110,0.08)', borderBottom: '1px solid rgba(200,169,110,0.2)' }}>
+          흐름 강조: <b>{s.model.flows[s.highlightFlowId!].name}</b>
+          <span style={{ color: 'rgba(255,255,255,0.45)' }}>참여 컴포넌트와 그 사이 호출만 진하게</span>
+          <button style={btn()} onClick={s.clearFlowHighlight} data-testid="aa-flow-highlight-clear">해제</button>
+        </div>
+      )}
 
       {s.backupMessage && <div role="status" style={{ padding: '6px 14px', color: '#f3c97a' }}>{s.backupMessage}</div>}
       {s.recovery && (
@@ -305,12 +356,32 @@ function Studio({ projectId }: { projectId: string }) {
       )}
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        {s.panel === 'flows' && s.model ? <FlowPanel edits={edits} /> : <>
         {/* Palette */}
         {paletteOpen && (
           <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.07)', background: '#0a0a0c', padding: 12, overflowY: 'auto' }}>
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="검색 (postgres, redis, kafka…)" data-testid="aa-palette-search"
               onKeyDown={(e) => { if (e.key === 'Escape') setQuery(''); if (e.key === 'Enter' && items[0]) addAtCenter(items[0]); }}
               style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 7, fontSize: 12, background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.9)', borderStyle: 'solid', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', outline: 'none' }} />
+            {refs.length > 0 && (
+              <div data-testid="aa-palette-refs">
+                <div style={{ margin: '12px 0 6px', fontSize: 11, color: '#c8a96e', fontWeight: 600, letterSpacing: '0.06em' }}>다른 View의 컴포넌트</div>
+                {refs.map((r) => (
+                  <div key={r.componentId} draggable role="button" tabIndex={0} data-testid="aa-palette-ref"
+                    title={r.orphan ? '어느 View에도 없음 — 놓으면 다시 보입니다' : `있는 곳: ${r.views.map((v) => v.label).join(', ')}`}
+                    onDragStart={(e) => { e.dataTransfer.setData(REF_MIME, r.componentId); e.dataTransfer.effectAllowed = 'move'; }}
+                    onClick={() => addRefAtCenter(r.componentId)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') addRefAtCenter(r.componentId); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 7, cursor: 'grab', userSelect: 'none', fontSize: 12.5 }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+                    <span style={{ color: '#c8a96e' }}>⧉</span>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                    <span style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.4)' }}>{r.orphan ? '어느 View에도 없음' : r.views[0].label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {CATEGORY_ORDER.map((cat) => {
               const list = items.filter((i) => i.category === cat);
               if (!list.length) return null;
@@ -377,6 +448,7 @@ function Studio({ projectId }: { projectId: string }) {
         </div>
 
         {inspectorOpen && <PropertyInspector edits={edits} />}
+        </>}
       </div>
 
       {s.pendingDelete && <DeleteDialog />}
@@ -429,12 +501,15 @@ function DeleteDialog() {
         <div id="aa-del-title" style={{ fontWeight: 600, fontSize: 14 }}>컴포넌트도 삭제할까요?</div>
         <div style={{ marginTop: 10, color: 'rgba(255,255,255,0.6)', lineHeight: 1.6 }}>
           컴포넌트 {p.componentCount}개{p.relationCount ? `와 연결된 관계 ${p.relationCount}개도 함께 삭제됩니다.` : '가 삭제됩니다.'}<br />
+          {p.otherViewCount > 0 && <><b style={{ color: '#f5a524' }}>다른 View {p.otherViewCount}곳에서도 사라집니다.</b><br /></>}
+          {p.flowCount > 0 && <>API Flow {p.flowCount}개의 참여에서 빠집니다(본문은 고쳐야 한다고 표시됩니다).<br /></>}
+          {p.flowsUnderTwo.length > 0 && <b style={{ color: '#ff9b9d' }} data-testid="aa-delete-flows-under-two">참여가 2개 미만이 되는 흐름 {p.flowsUnderTwo.length}개({p.flowsUnderTwo.join(', ')})는 함께 삭제됩니다.<br /></b>}
           “노드만 제거”는 화면에서만 지우고 컴포넌트·관계는 남깁니다 (저장 시 경고).
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
           <button style={btn()} onClick={cancelDelete}>취소</button>
           <button style={btn()} onClick={() => confirmDelete('nodes')} data-testid="aa-delete-nodes">노드만 제거</button>
-          <button autoFocus style={{ ...btn(), background: '#e5484d', borderColor: '#e5484d', color: '#fff', fontWeight: 600 }} onClick={() => confirmDelete('components')} data-testid="aa-delete-components">컴포넌트 삭제</button>
+          <button autoFocus style={{ ...btn(), background: '#e5484d', borderColor: '#e5484d', color: '#fff', fontWeight: 600 }} onClick={() => confirmDelete('components')} data-testid="aa-delete-components">{p.flowsUnderTwo.length ? '컴포넌트·흐름 함께 삭제' : '컴포넌트 삭제'}</button>
         </div>
       </div>
     </div>

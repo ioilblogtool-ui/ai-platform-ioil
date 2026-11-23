@@ -57,7 +57,9 @@ describe('Inspector model edits', () => {
     assert.equal(edited.components.cmp_a.description, '**보고서** 설명');
     const graph = toFlow(edited, 'view_logical');
     assert.equal(graph.nodes.find((node) => node.id === 'nd_a').data.name, 'Reports API');
-    assert.deepEqual(graph.edges[0].data, { relationId: 'rel_a', protocol: 'Kafka', mode: 'async', label: 'report.ready' });
+    const { relation, ...edgeData } = graph.edges[0].data;
+    assert.deepEqual(edgeData, { relationId: 'rel_a', protocol: 'Kafka', mode: 'async', label: 'report.ready' });
+    assert.equal(relation.id, 'rel_a');
     assert.deepEqual(validateModel(edited).errors, []);
   });
 

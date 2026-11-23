@@ -4,7 +4,7 @@ import { useState } from 'react';
 import MarkdownPreview from '@/components/MarkdownPreview';
 import type { Component, PropertyDef, Relation } from '@/lib/aa/architecture-types';
 import {
-  componentTextError, customKeyError, deploymentViewSummary, PROTOCOLS, RELATION_MODES, realizesTargets, relationFieldError, runLocations, STRATEGY_MAX_BYTES,
+  componentPlacements, componentTextError, CREDENTIALS, customKeyError, DATA_CLASSES, deploymentViewSummary, ON_FAILURE, PROTOCOLS, RELATION_MODES, RETRY_BACKOFFS, realizesTargets, relationAttrError, relationFieldError, relationSummary, runLocations, STRATEGY_MAX_BYTES,
 } from '@/lib/aa/model-ops';
 import { useStudio } from '@/lib/aa/studio-store';
 import SchemaForm, { fieldStyle, InspectorField, type InspectorEdits } from './SchemaForm';
@@ -43,6 +43,7 @@ export default function PropertyInspector({ edits }: { edits: InspectorEdits }) 
       )}
       {definition?.realizes && <RealizesEditor componentId={component.id} />}
       {component.layer === 'logical' && <RunLocations componentId={component.id} />}
+      <Placements componentId={component.id} />
       <ComponentEditor
         key={`${s.projectId}:${component.id}`}
         component={component} definitions={definition?.properties ?? []} edits={edits}
@@ -240,8 +241,57 @@ function RelationEditor({ relation, edits }: { relation: Relation; edits: Inspec
           validate={(value) => relationFieldError(field, value)}
           onCommit={(value) => update(relation.id, field, value)} edits={edits} />
       ))}
+      <RelationAttrs relation={relation} edits={edits} />
       <RequirementLinks target="relations" id={relation.id} linked={relation.requirementIds} />
     </div>
+  );
+}
+
+/** Sprint 8 (REL-05·06): 운영·보안 속성. 값을 적는 칸은 없다(유형만). 비우면 그 속성을 지운다 */
+function RelationAttrs({ relation, edits }: { relation: Relation; edits: InspectorEdits }) {
+  const update = useStudio((s) => s.updateRelationAttr);
+  const summary = relationSummary(relation);
+  const field = (attr: Parameters<typeof update>[1], label: string, value: string, choices?: readonly string[], placeholder?: string) => (
+    <InspectorField key={attr} label={label} choices={choices ? [...choices] : undefined} value={value} placeholder={placeholder}
+      validate={(v) => relationAttrError(attr, v)} onCommit={(v) => update(relation.id, attr, v)} edits={edits} />
+  );
+  return (
+    <>
+      <section data-testid="aa-relation-ops" style={{ display: 'grid', gap: 10 }}>
+        <b style={{ fontSize: 12.5, color: '#c8a96e' }}>운영</b>
+        {field('timeoutMs', 'Timeout (ms)', relation.timeoutMs === undefined ? '' : String(relation.timeoutMs), undefined, '예: 3000 (비우면 없음)')}
+        {field('retryMax', '재시도 횟수', relation.retry ? String(relation.retry.max) : '', undefined, '0~10 (비우면 없음)')}
+        {relation.retry && field('retryBackoff', '재시도 방식', relation.retry.backoff, RETRY_BACKOFFS)}
+        {field('onFailure', '실패 시 동작', relation.onFailure ?? '', ON_FAILURE)}
+      </section>
+      <section data-testid="aa-relation-security" style={{ display: 'grid', gap: 10 }}>
+        <b style={{ fontSize: 12.5, color: '#c8a96e' }}>보안</b>
+        {field('credential', '자격증명 유형', relation.credential ?? '', CREDENTIALS)}
+        {field('dataClass', '데이터 등급', relation.dataClass ?? '', DATA_CLASSES)}
+        <div style={muted}>유형만 고릅니다. 키·토큰 값은 어디에도 저장하지 않습니다.</div>
+      </section>
+      {summary && <div style={{ ...muted, fontFamily: 'Consolas, monospace' }} data-testid="aa-relation-summary">{summary}</div>}
+    </>
+  );
+}
+
+/** Sprint 8 (VIEW-05): 이 컴포넌트가 있는 View — 2곳 이상일 때만, 누르면 그 View의 노드로 이동 */
+function Placements({ componentId }: { componentId: string }) {
+  const model = useStudio((s) => s.model);
+  const viewId = useStudio((s) => s.viewId);
+  const focusNode = useStudio((s) => s.focusNode);
+  const list = model ? componentPlacements(model, componentId) : [];
+  if (list.length < 2) return null;
+  return (
+    <section data-testid="aa-placements" style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 12, color: '#c8a96e' }}>⧉ 이 컴포넌트가 있는 View {list.length}곳</div>
+      <div style={{ display: 'grid', gap: 4, marginTop: 6 }}>
+        {list.map((p) => (
+          <button key={p.viewId} style={{ ...button, textAlign: 'left', opacity: p.viewId === viewId ? 0.55 : 1 }} disabled={p.viewId === viewId}
+            onClick={() => focusNode(p.viewId, p.nodeId)}>{p.viewId === viewId ? '· ' : '→ '}{p.label}</button>
+        ))}
+      </div>
+    </section>
   );
 }
 

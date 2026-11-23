@@ -2,7 +2,7 @@
 // 모든 함수는 입력 모델을 바꾸지 않고 새 모델을 돌려준다. 바꿀 것이 없거나 거부되면 입력 모델을 그대로 돌려준다.
 //
 // 좌표 기준: parentId가 있으면 position은 부모 그룹 좌상단 기준 상대 좌표, 없으면 캔버스 절대 좌표 (React Flow sub-flow와 같음).
-import type { ArchitectureModel, Component, PropertyDef, Relation, TypeRegistry, View, ViewNode } from './architecture-types';
+import type { ArchitectureModel, Component, PropertyDef, Relation, RetryBackoff, TypeRegistry, View, ViewNode } from './architecture-types';
 
 export type NewId = (prefix: 'cmp' | 'rel' | 'nd' | 'ed' | 'view') => string;
 export type Point = { x: number; y: number };
@@ -122,6 +122,56 @@ export function updateRelationField(model: ArchitectureModel, id: string, field:
   return { ...model, relations: { ...model.relations, [id]: updated } };
 }
 
+// ── 관계 운영·보안 속성 (Sprint 8 · REL-05·06 · D-26) ─────────────────────────────
+// calls에만. 값 칸은 없다(유형만). 빈 값 = 그 속성 지우기. 수치는 서버 V2와 같은 제한.
+export const TIMEOUT_MAX_MS = 600000;
+export const RETRY_MAX = 10;
+export const RETRY_BACKOFFS = ['none', 'fixed', 'exponential'] as const;
+export const ON_FAILURE = ['propagate', 'fallback', 'queue_retry', 'ignore'] as const;
+export const CREDENTIALS = ['none', 'session-cookie', 'jwt-bearer', 'api-key', 'service-role', 'mtls'] as const;
+export const DATA_CLASSES = ['public', 'internal', 'personal', 'sensitive'] as const;
+export type RelationAttr = 'timeoutMs' | 'retryMax' | 'retryBackoff' | 'onFailure' | 'credential' | 'dataClass';
+
+const intIn = (raw: string, min: number, max: number) => /^\d+$/.test(raw.trim()) && Number(raw) >= min && Number(raw) <= max;
+
+export function relationAttrError(attr: RelationAttr, raw: string): string | undefined {
+  if (raw === '') return;
+  switch (attr) {
+    case 'timeoutMs': return intIn(raw, 1, TIMEOUT_MAX_MS) ? undefined : `1~${TIMEOUT_MAX_MS} 사이 정수(ms)로 입력하세요.`;
+    case 'retryMax': return intIn(raw, 0, RETRY_MAX) ? undefined : `0~${RETRY_MAX} 사이 정수로 입력하세요.`;
+    case 'retryBackoff': return (RETRY_BACKOFFS as readonly string[]).includes(raw) ? undefined : '지원하지 않는 방식입니다.';
+    case 'onFailure': return (ON_FAILURE as readonly string[]).includes(raw) ? undefined : '지원하지 않는 동작입니다.';
+    case 'credential': return (CREDENTIALS as readonly string[]).includes(raw) ? undefined : '지원하지 않는 자격증명 유형입니다.';
+    case 'dataClass': return (DATA_CLASSES as readonly string[]).includes(raw) ? undefined : '지원하지 않는 데이터 등급입니다.';
+  }
+}
+
+/** 운영·보안 속성 하나 바꾸기. retry는 횟수가 비면 통째로 지우고, 방식이 비면 'none' */
+export function updateRelationAttr(model: ArchitectureModel, id: string, attr: RelationAttr, raw: string): ArchitectureModel {
+  const relation = model.relations[id];
+  if (!relation || relation.type !== 'calls' || relationAttrError(attr, raw)) return model;
+  const updated: Relation = { ...relation };
+  if (attr === 'timeoutMs') {
+    if (raw === '') delete updated.timeoutMs; else updated.timeoutMs = Number(raw);
+  } else if (attr === 'retryMax') {
+    if (raw === '') delete updated.retry;
+    else updated.retry = { max: Number(raw), backoff: relation.retry?.backoff ?? 'fixed' };
+  } else if (attr === 'retryBackoff') {
+    if (!relation.retry) return model;
+    updated.retry = { max: relation.retry.max, backoff: (raw || 'none') as RetryBackoff };
+  } else {
+    if (raw === '') delete updated[attr]; else (updated as unknown as Record<string, unknown>)[attr] = raw;
+  }
+  return JSON.stringify(updated) === JSON.stringify(relation) ? model : { ...model, relations: { ...model.relations, [id]: updated } };
+}
+
+/** 엣지 툴팁·요약: `HTTPS · sync · 3s · retry 1 fixed · jwt-bearer · personal` */
+export function relationSummary(r: Relation): string {
+  const timeout = r.timeoutMs === undefined ? null : r.timeoutMs % 1000 === 0 ? `${r.timeoutMs / 1000}s` : `${r.timeoutMs}ms`;
+  return [r.protocol, r.mode, timeout, r.retry ? `retry ${r.retry.max} ${r.retry.backoff}` : null, r.onFailure ? `실패 시 ${r.onFailure}` : null, r.credential, r.dataClass]
+    .filter(Boolean).join(' · ');
+}
+
 export type RequirementTarget = 'components' | 'relations';
 
 /** 컴포넌트·관계의 요구사항 연결(on=true)·해제(on=false). 이미 같은 상태면 입력 모델을 그대로 돌려준다 */
@@ -235,6 +285,56 @@ export function addComponent(
     v.nodes.push(node);
   });
   return { model: next, nodeId, componentId };
+}
+
+// ── 참조 노드 (Sprint 8 · VIEW-05 · 04 §6.3·§6.4) ─────────────────────────────────
+// 같은 componentId의 노드를 다른 View에도 둔다. 한 View에 같은 컴포넌트 노드는 최대 1개(03 §2.2).
+
+export type ReferenceCandidate = { componentId: string; name: string; type: string; views: { id: string; label: string }[]; orphan: boolean };
+
+const viewLabel = (v: View) => (v.kind === 'deployment' ? v.variant ?? v.name : v.name);
+
+/** 지금 View에 놓을 수 있는 다른 View의 컴포넌트 — 레지스트리 views가 이 View 종류를 허용하고, 이 View에 노드가 없는 것. 고아 먼저 */
+export function referenceCandidates(model: ArchitectureModel, viewId: string, registry: TypeRegistry | null): ReferenceCandidate[] {
+  const view = getView(model, viewId);
+  if (!view) return [];
+  const here = new Set(view.nodes.map((n) => n.componentId).filter(Boolean));
+  const out: ReferenceCandidate[] = [];
+  for (const c of Object.values(model.components)) {
+    if (here.has(c.id)) continue;
+    const allowed = registry?.types[c.type]?.views;
+    if (!allowed || !allowed.includes(view.kind)) continue;
+    const views = model.views.filter((v) => v.nodes.some((n) => n.componentId === c.id)).map((v) => ({ id: v.id, label: viewLabel(v) }));
+    out.push({ componentId: c.id, name: c.name, type: c.type, views, orphan: views.length === 0 });
+  }
+  return out.sort((a, b) => Number(b.orphan) - Number(a.orphan) || a.name.localeCompare(b.name, 'ko'));
+}
+
+/** 참조 노드 추가. 이미 이 View에 있거나 허용되지 않는 타입이면 그대로 */
+export function addReferenceNode(
+  model: ArchitectureModel, viewId: string, componentId: string, registry: TypeRegistry | null, position: Point, newId: NewId,
+): { model: ArchitectureModel; nodeId: string | null } {
+  const c = model.components[componentId];
+  const view = getView(model, viewId);
+  if (!c || !view || view.nodes.some((n) => n.componentId === componentId)) return { model, nodeId: null };
+  const def = registry?.types[c.type];
+  if (!def?.views?.includes(view.kind)) return { model, nodeId: null };
+  let nodeId: string | null = null;
+  const next = withView(model, viewId, (_m, v) => {
+    nodeId = newId('nd');
+    const node: ViewNode = { id: nodeId, kind: 'component', componentId, position: round(position) };
+    if (def.container) { node.width = GROUP_DEFAULT_SIZE.width; node.height = GROUP_DEFAULT_SIZE.height; }
+    v.nodes.push(node);
+  });
+  return { model: next, nodeId };
+}
+
+/** 이 컴포넌트가 있는 View와 그 노드 (Inspector 이동용) */
+export function componentPlacements(model: ArchitectureModel, componentId: string): { viewId: string; label: string; nodeId: string }[] {
+  return model.views.flatMap((v) => {
+    const n = v.nodes.find((x) => x.componentId === componentId);
+    return n ? [{ viewId: v.id, label: viewLabel(v), nodeId: n.id }] : [];
+  });
 }
 
 export function addGroup(
@@ -361,6 +461,17 @@ function pruneEdges(m: ArchitectureModel, v: View) {
 
 function deleteComponent(m: ArchitectureModel, componentId: string) {
   delete m.components[componentId];
+  // Sprint 8 (Q6): 흐름의 참여·인증 역할에서 뺀다. 참여가 2개 미만이 되는 흐름은 함께 지운다
+  // (확인 창이 [취소]/[흐름도 함께 삭제]만 주므로 여기 왔으면 사용자가 동의함). 본문 참조는 그대로 — 화면이 불일치로 알린다
+  for (const [fid, fl] of Object.entries(m.flows ?? {})) {
+    if (!fl.participantIds.includes(componentId)) continue;
+    fl.participantIds = fl.participantIds.filter((cid) => cid !== componentId);
+    if (fl.auth) {
+      for (const role of ['tokenIssuer', 'tokenVerifier', 'dataAccessor'] as const) if (fl.auth[role] === componentId) delete fl.auth[role];
+      if (!Object.keys(fl.auth).length) delete fl.auth;
+    }
+    if (fl.participantIds.length < 2) delete m.flows![fid];
+  }
   for (const [rid, r] of Object.entries(m.relations)) {
     if (r.from !== componentId && r.to !== componentId) continue;
     delete m.relations[rid];
@@ -372,45 +483,52 @@ function deleteComponent(m: ArchitectureModel, componentId: string) {
  * 노드 제거 (04 §6.8).
  * - 지운 그룹의 자식은 화면 절대 위치를 유지한 채, 남아 있는 가장 가까운 조상(없으면 캔버스)으로 옮긴다
  * - 붙은 엣지(표현)는 지운다
- * - deleteComponents=true: 어느 View에도 남지 않는 컴포넌트와 그 관계, 모든 View의 해당 엣지까지 지운다
- * - deleteComponents=false: "노드만 제거" — 컴포넌트·relations는 남는다 (저장 시 V7 경고)
+ * - deleteComponents=true: 그 컴포넌트를 **모든 View에서** 지운다(Sprint 8 참조 노드 — 다른 View의 노드도 같은 규칙으로 제거),
+ *   관계와 모든 View의 해당 엣지까지. Sprint 8 Step 3부터 흐름 참여·역할에서도 뺀다
+ * - deleteComponents=false: "노드만 제거" — 이 View의 노드만. 컴포넌트·relations·다른 View는 그대로 (저장 시 V7 경고)
  */
 export function removeNodes(
   model: ArchitectureModel, viewId: string, nodeIds: string[], opts: { deleteComponents: boolean },
 ): ArchitectureModel {
   return withView(model, viewId, (m, v) => {
-    const gone = new Set(nodeIds.filter((id) => v.nodes.some((n) => n.id === id)));
-    if (!gone.size) return false;
-    const byId = new Map(v.nodes.map((n) => [n.id, n]));
-
-    // 남는 노드 중 부모가 지워지는 것: 새 좌표는 모두 계산한 뒤 한 번에 반영 (계산 중 좌표가 바뀌지 않게)
-    const reparent = new Map<string, { position: Point; parentId?: string }>();
-    for (const n of v.nodes) {
-      if (gone.has(n.id) || !n.parentId || !gone.has(n.parentId)) continue;
-      const abs = absolutePosition(v, n.id);
-      let anc = byId.get(n.parentId);
-      while (anc && gone.has(anc.id)) anc = anc.parentId ? byId.get(anc.parentId) : undefined;
-      const base = anc ? absolutePosition(v, anc.id) : { x: 0, y: 0 };
-      reparent.set(n.id, { position: { x: abs.x - base.x, y: abs.y - base.y }, parentId: anc?.id });
-    }
-    for (const [id, r] of reparent) {
-      const n = byId.get(id)!;
-      n.position = r.position;
-      if (r.parentId) n.parentId = r.parentId; else delete n.parentId;
-    }
-
-    const removed = v.nodes.filter((n) => gone.has(n.id));
-    v.nodes = v.nodes.filter((n) => !gone.has(n.id));
-
+    const removed = dropNodes(v, new Set(nodeIds));
+    if (!removed.length) return false;
     if (opts.deleteComponents) {
-      for (const n of removed) {
-        if (!n.componentId || !m.components[n.componentId]) continue;
-        const stillShown = m.views.some((vv) => vv.nodes.some((x) => x.componentId === n.componentId));
-        if (!stillShown) deleteComponent(m, n.componentId);
+      const cids = new Set(removed.map((n) => n.componentId).filter((cid): cid is string => Boolean(cid && m.components[cid])));
+      for (const vv of m.views) {
+        if (vv === v) continue;
+        const ids = vv.nodes.filter((n) => n.componentId && cids.has(n.componentId)).map((n) => n.id);
+        if (ids.length) { dropNodes(vv, new Set(ids)); pruneEdges(m, vv); }
       }
+      for (const cid of cids) deleteComponent(m, cid);
     }
     pruneEdges(m, v);
   });
+}
+
+/** 한 View에서 노드를 빼고 남는 자식의 절대 위치를 보존한다. 뺀 노드 목록을 돌려준다 */
+function dropNodes(v: View, requested: Set<string>): ViewNode[] {
+  const gone = new Set([...requested].filter((id) => v.nodes.some((n) => n.id === id)));
+  if (!gone.size) return [];
+  const byId = new Map(v.nodes.map((n) => [n.id, n]));
+  // 남는 노드 중 부모가 지워지는 것: 새 좌표는 모두 계산한 뒤 한 번에 반영 (계산 중 좌표가 바뀌지 않게)
+  const reparent = new Map<string, { position: Point; parentId?: string }>();
+  for (const n of v.nodes) {
+    if (gone.has(n.id) || !n.parentId || !gone.has(n.parentId)) continue;
+    const abs = absolutePosition(v, n.id);
+    let anc = byId.get(n.parentId);
+    while (anc && gone.has(anc.id)) anc = anc.parentId ? byId.get(anc.parentId) : undefined;
+    const base = anc ? absolutePosition(v, anc.id) : { x: 0, y: 0 };
+    reparent.set(n.id, { position: { x: abs.x - base.x, y: abs.y - base.y }, parentId: anc?.id });
+  }
+  for (const [id, r] of reparent) {
+    const n = byId.get(id)!;
+    n.position = r.position;
+    if (r.parentId) n.parentId = r.parentId; else delete n.parentId;
+  }
+  const removed = v.nodes.filter((n) => gone.has(n.id));
+  v.nodes = v.nodes.filter((n) => !gone.has(n.id));
+  return removed;
 }
 
 /** 엣지 제거. deleteRelations=true면 다른 View에서도 쓰지 않는 관계까지 지운다 (Sprint 1 동작) */
@@ -433,15 +551,20 @@ export function removeEdges(
 export function deleteSummary(model: ArchitectureModel, viewId: string, nodeIds: string[]) {
   const v = getView(model, viewId);
   const nodes = v ? v.nodes.filter((n) => nodeIds.includes(n.id)) : [];
-  const componentIds = nodes
-    .filter((n) => n.kind === 'component' && n.componentId)
-    .map((n) => n.componentId!)
-    .filter((cid) => !model.views.some((vv) => vv.nodes.some((x) => x.componentId === cid && !nodeIds.includes(x.id))));
+  const componentIds = [...new Set(nodes.filter((n) => n.kind === 'component' && n.componentId && model.components[n.componentId]).map((n) => n.componentId!))];
   const cset = new Set(componentIds);
   const relationCount = Object.values(model.relations).filter((r) => cset.has(r.from) || cset.has(r.to)).length;
+  // Sprint 8: "컴포넌트 삭제"는 모든 View에서 지운다 → 다른 View 수를 알린다
+  const otherViewCount = model.views.filter((vv) => vv.id !== viewId && vv.nodes.some((x) => x.componentId && cset.has(x.componentId))).length;
+  // Sprint 8 (Q6): 흐름에서 빠지는 수, 참여가 2개 미만이 되어 함께 지워지는 흐름
+  const flows = Object.values(model.flows ?? {}).filter((fl) => fl.participantIds.some((cid) => cset.has(cid)));
+  const flowsUnderTwo = flows.filter((fl) => fl.participantIds.filter((cid) => !cset.has(cid)).length < 2).map((fl) => fl.name);
   return {
     componentCount: componentIds.length,
     relationCount,
+    otherViewCount,
+    flowCount: flows.length,
+    flowsUnderTwo,
     needsConfirm: componentIds.length > 0,   // 그룹·노트만이면 묻지 않음
   };
 }

@@ -9,6 +9,7 @@ import { getAaProject, getDraft, getTypeRegistry, listRequirements, modelByteSiz
 import { newId } from './ids';
 import type { AaFlowNode } from './graph-mapper';
 import * as ops from './model-ops';
+import * as flowOps from './flow-ops';
 import { createClient } from '../supabase';
 import { createAutosave } from './autosave';
 import { readDraftBackup, removeDraftBackup, writeDraftBackup } from './draft-backup';
@@ -17,7 +18,11 @@ export type SaveState = 'loading' | 'saved' | 'dirty' | 'saving' | 'error' | 'co
 type Point = { x: number; y: number };
 
 /** 확인이 필요한 삭제 (컴포넌트가 포함된 경우). 그룹·노트·엣지만이면 바로 삭제한다 */
-export type PendingDelete = { nodeIds: string[]; edgeIds: string[]; componentCount: number; relationCount: number };
+export type PendingDelete = {
+  nodeIds: string[]; edgeIds: string[]; componentCount: number; relationCount: number; otherViewCount: number;
+  /** Sprint 8: 흐름에서 빠지는 수, 참여 부족으로 함께 지워질 흐름 이름 */
+  flowCount: number; flowsUnderTwo: string[];
+};
 
 type StudioState = {
   projectId: string | null;
@@ -40,6 +45,13 @@ type StudioState = {
   selectedEdgeIds: string[];
   pendingDelete: PendingDelete | null;
   loadError: string | null;
+  /** Sprint 8 (API Flow): 가운데를 캔버스 대신 흐름 화면으로 */
+  panel: 'canvas' | 'flows';
+  selectedFlowId: string | null;
+  /** FLW-06: Logical 캔버스에서 강조할 흐름 (해제하면 null) */
+  highlightFlowId: string | null;
+  /** 로드 시 정리한 흐름 참조 (Q12) — removed: 뺀 참여·역할 수, underTwo: 유효 참여가 2개 미만인 흐름 */
+  flowRepair: { removed: number; underTwo: string[] } | null;
 
   backupMessage: string | null;
   recovery: ReturnType<typeof readDraftBackup>;
@@ -51,6 +63,14 @@ type StudioState = {
   reloadServer: () => Promise<void>;
   overwrite: () => Promise<void>;
   addComponent: (type: string, position: Point) => void;
+  openFlows: (flowId?: string | null) => void;
+  selectFlow: (flowId: string | null) => void;
+  clearFlowHighlight: () => void;
+  /** 흐름 편집 — 거부되면 이유를 돌려준다 */
+  flowEdit: (fn: (m: ArchitectureModel) => { model: ArchitectureModel; error?: string }) => string | undefined;
+  dismissFlowRepair: () => void;
+  /** Sprint 8 (VIEW-05): 다른 View의 컴포넌트를 참조 노드로 */
+  addReference: (componentId: string, position: Point) => void;
   addGroup: (position: Point) => void;
   addNote: (position: Point) => void;
   applyNodeChanges: (changes: NodeChange<AaFlowNode>[]) => void;
@@ -69,6 +89,8 @@ type StudioState = {
   updateComponentProperty: (id: string, key: string, raw: string) => void;
   updateCustomProperty: (id: string, previous: string | undefined, key: string, value?: string) => void;
   updateRelationField: (id: string, field: 'protocol' | 'mode' | 'label', value: string) => void;
+  /** Sprint 8: calls 운영·보안 속성 (빈 값 = 지우기) */
+  updateRelationAttr: (id: string, attr: ops.RelationAttr, value: string) => void;
   setRequirementLink: (target: ops.RequirementTarget, id: string, requirementId: string, on: boolean) => void;
 
   // ── 배치안 (Sprint 7) ──
@@ -293,8 +315,42 @@ export const useStudio = create<StudioState>((set, get) => {
 
     setView(viewId) {
       const { model } = get();
-      if (!model || !model.views.some((v) => v.id === viewId) || get().viewId === viewId) return;
-      set({ viewId, selectedNodeIds: [], selectedEdgeIds: [], pendingDelete: null, focusNodeId: null });
+      if (!model || !model.views.some((v) => v.id === viewId)) return;
+      if (get().viewId === viewId && get().panel === 'canvas') return;
+      set({ viewId, panel: 'canvas', selectedNodeIds: [], selectedEdgeIds: [], pendingDelete: null, focusNodeId: null });
+    },
+
+    openFlows(flowId) {
+      const { model } = get();
+      const first = Object.keys(model?.flows ?? {})[0] ?? null;
+      const id = flowId && model?.flows?.[flowId] ? flowId : get().selectedFlowId && model?.flows?.[get().selectedFlowId!] ? get().selectedFlowId : first;
+      set({ panel: 'flows', selectedFlowId: id, highlightFlowId: id, selectedNodeIds: [], selectedEdgeIds: [], pendingDelete: null });
+    },
+
+    selectFlow(flowId) {
+      set({ selectedFlowId: flowId, highlightFlowId: flowId });
+    },
+
+    clearFlowHighlight() {
+      set({ highlightFlowId: null });
+    },
+
+    flowEdit(fn) {
+      let error: string | undefined;
+      edit((m) => { const res = fn(m); error = res.error; return res.model; });
+      const { model, selectedFlowId, highlightFlowId } = get();
+      // 흐름이 사라지면 선택·강조 해제
+      if (selectedFlowId && !model?.flows?.[selectedFlowId]) set({ selectedFlowId: null });
+      if (highlightFlowId && !model?.flows?.[highlightFlowId]) set({ highlightFlowId: null });
+      if (get().flowRepair) {
+        const re = model ? flowOps.repairFlows(model) : null;
+        set({ flowRepair: re && re.underTwo.length ? { removed: 0, underTwo: re.underTwo } : null });
+      }
+      return error;
+    },
+
+    dismissFlowRepair() {
+      set({ flowRepair: null });
     },
 
     focusNode(viewId, nodeId) {
@@ -361,6 +417,10 @@ export const useStudio = create<StudioState>((set, get) => {
     selectedEdgeIds: [],
     pendingDelete: null,
     loadError: null,
+    panel: 'canvas',
+    selectedFlowId: null,
+    highlightFlowId: null,
+    flowRepair: null,
 
     backupMessage: null,
     recovery: null,
@@ -383,6 +443,7 @@ export const useStudio = create<StudioState>((set, get) => {
       set({
         projectId, saveState: 'loading', loadError: null, model: null,
         selectedNodeIds: [], selectedEdgeIds: [], pendingDelete: null,
+        panel: 'canvas', selectedFlowId: null, highlightFlowId: null, flowRepair: null,
         conflictRevision: null, saveMessage: null, backupMessage: null, recovery: null, reloading: false,
         requirements: [], requirementsError: null, importing: false, importUndo: null,
       });
@@ -405,13 +466,17 @@ export const useStudio = create<StudioState>((set, get) => {
         } catch {
           backupMessage = '브라우저 복구본을 읽지 못했습니다.';
         }
+        // Sprint 8 (Q12): 끊긴 흐름 참여·역할 정리. 참여가 2개 미만인 흐름은 지우지 않고 안내만
+        const repaired = flowOps.repairFlows(draft.model);
         committedModel = draft.model;
         set({
+          flowRepair: repaired.removed || repaired.underTwo.length ? { removed: repaired.removed, underTwo: repaired.underTwo } : null,
           projectName: project.name, model: draft.model, baseRevision: draft.revision, baseVersion: draft.baseVersion,
           viewId: 'view_logical', placementWarnings: (draft.warnings ?? []).filter((w) => w.rule === 'V11'), focusNodeId: null,
           registry, saveState: 'saved', editSeq: 0, recovery, backupMessage,
         });
         void get().loadRequirements();
+        if (repaired.model !== draft.model) edit(() => repaired.model);   // 정리 결과는 편집으로 (자동 저장 대상)
       } catch (error) {
         if (session !== currentSession) return;
         const message = error instanceof AaApiError && error.code === 'NOT_FOUND'
@@ -476,6 +541,15 @@ export const useStudio = create<StudioState>((set, get) => {
     addComponent(type, position) {
       const nodeId = addNode((m, vid) => ops.addComponent(m, vid, type, get().registry, position, newId));
       // 그룹 위에 놓았으면 그 그룹의 자식으로
+      if (nodeId) {
+        const { model, viewId } = get();
+        const g = model && ops.findDropGroup(model, viewId, position, nodeId, get().registry);
+        if (g) edit((m, vid) => ops.setParent(m, vid, nodeId, g, get().registry));
+      }
+    },
+
+    addReference(componentId, position) {
+      const nodeId = addNode((m, vid) => ops.addReferenceNode(m, vid, componentId, get().registry, position, newId));
       if (nodeId) {
         const { model, viewId } = get();
         const g = model && ops.findDropGroup(model, viewId, position, nodeId, get().registry);
@@ -561,7 +635,7 @@ export const useStudio = create<StudioState>((set, get) => {
       if (!n.length && !e.length) return;
       const summary = ops.deleteSummary(model, viewId, n);
       if (summary.needsConfirm) {
-        set({ pendingDelete: { nodeIds: n, edgeIds: e, componentCount: summary.componentCount, relationCount: summary.relationCount } });
+        set({ pendingDelete: { nodeIds: n, edgeIds: e, componentCount: summary.componentCount, relationCount: summary.relationCount, otherViewCount: summary.otherViewCount, flowCount: summary.flowCount, flowsUnderTwo: summary.flowsUnderTwo } });
       } else {
         runDelete(n, e, true);   // 그룹·노트·엣지만 — 컴포넌트가 없으므로 deleteComponents는 의미 없음
       }
@@ -612,6 +686,9 @@ export const useStudio = create<StudioState>((set, get) => {
       edit((m) => ops.updateCustomProperty(m, get().registry, id, previous, key, value));
     },
 
+    updateRelationAttr(id, attr, value) {
+      edit((m) => ops.updateRelationAttr(m, id, attr, value));
+    },
     updateRelationField(id, field, value) {
       edit((m) => ops.updateRelationField(m, id, field, value));
     },

@@ -34,6 +34,8 @@ export default function ContainerNode({ data, selected }: NodeProps<AaContainerF
         </span>
       </div>
       {!isZone && <Handle type="source" position={Position.Right} style={handle} />}
+      {data.sharedViews && <span data-testid="aa-node-shared" title={`다른 View에도 있는 컴포넌트 (${data.sharedViews}곳)`} aria-label={`참조 노드 · ${data.sharedViews}개 View`}
+        style={{ position: 'absolute', right: 8, bottom: 6, fontSize: 11, color: '#c8a96e' }}>⧉</span>}
     </div>
   );
 }

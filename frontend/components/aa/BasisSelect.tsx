@@ -3,8 +3,28 @@
 // 내보내기 기준 고르기 (Sprint 6 Step 4 · Q12). README는 "최신 발행본"(기본)·버전·Draft, Ask AI는 Draft(기본)·버전.
 // 값: 'latest' | 'draft' | 버전 id
 import { useEffect, useState, type CSSProperties } from 'react';
-import { listVersions } from '@/lib/aa/architecture-api';
-import type { VersionListItem } from '@/lib/aa/architecture-types';
+import { getDraft, getVersion, listVersions } from '@/lib/aa/architecture-api';
+import type { ApiFlow, VersionListItem } from '@/lib/aa/architecture-types';
+
+/** Sprint 8: 고른 원본(Draft·버전·최신 발행본)의 흐름 목록 — README apiFlows·Ask AI flow 범위 선택용 */
+export function useBasisFlows(projectId: string, basis: BasisValue): ApiFlow[] | null {
+  const [flows, setFlows] = useState<ApiFlow[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setFlows(null);
+    (async () => {
+      let model;
+      if (basis === 'draft') model = (await getDraft(projectId)).model;
+      else if (basis === 'latest') {
+        const latest = (await listVersions(projectId, { limit: 1 })).data?.[0];
+        model = latest ? (await getVersion(projectId, latest.id)).model : (await getDraft(projectId)).model;
+      } else model = (await getVersion(projectId, basis)).model;
+      if (alive) setFlows(Object.values(model?.flows ?? {}));
+    })().catch(() => { if (alive) setFlows([]); });
+    return () => { alive = false; };
+  }, [projectId, basis]);
+  return flows;
+}
 
 export type BasisValue = 'latest' | 'draft' | string;
 

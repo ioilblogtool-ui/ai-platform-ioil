@@ -3,6 +3,7 @@
 // 런타임 import 없음 (type만) — Node 테스트에서 바로 불러온다.
 import type { Edge, Node } from '@xyflow/react';
 import type { ArchitectureModel, Component, Relation, View, ViewNode } from './architecture-types';
+import type { EdgeMark } from './boundary';
 
 export type ComponentNodeData = {
   componentId: string;
@@ -11,6 +12,10 @@ export type ComponentNodeData = {
   technology?: string;
   /** V11 경고 (Sprint 7): 배치안의 Process가 VM·Platform 밖에 있음 */
   warning?: string;
+  /** Sprint 8 (VIEW-05): 이 컴포넌트가 놓인 View 수가 2 이상이면 그 수 (⧉ 표시) */
+  sharedViews?: number;
+  /** Sprint 8 (FLW-06): 흐름 강조 중 참여가 아닌 노드 */
+  dimmed?: boolean;
 };
 /** 배치안의 컨테이너 컴포넌트(환경·구역·플랫폼·VM) — 크기를 가진 component 노드 (Sprint 7) */
 export type ContainerNodeData = ComponentNodeData & { trust?: string; summary?: string };
@@ -26,7 +31,14 @@ export type AaFlowNode = AaComponentFlowNode | AaGroupFlowNode | AaNoteFlowNode 
 /** 크기를 가진 노드 = 부모가 될 수 있는 노드 (group, 컨테이너 컴포넌트) */
 const isBox = (n: ViewNode) => n.kind === 'group' || (n.kind === 'component' && n.width !== undefined && n.height !== undefined);
 
-export type RelationEdgeData = { relationId: string; protocol?: string; label?: string; mode?: 'sync' | 'async' };
+export type RelationEdgeData = {
+  relationId: string; protocol?: string; label?: string; mode?: 'sync' | 'async';
+  /** Sprint 8: 운영·보안 속성 전체(툴팁) + 경계·데이터 표시 */
+  relation?: Relation;
+  mark?: EdgeMark;
+  /** Sprint 8 (FLW-06): 흐름 강조 중 강조 대상이 아닌 엣지 */
+  dimmed?: boolean;
+};
 export type AaFlowEdge = Edge<RelationEdgeData, 'relation'>;
 
 export function getView(model: ArchitectureModel, viewId: string): View | undefined {
@@ -61,11 +73,15 @@ export function sortParentsFirst(nodes: ViewNode[]): ViewNode[] {
 /** 한 View의 노드·엣지를 React Flow 형태로 */
 export function toFlow(
   model: ArchitectureModel, viewId: string, selectedNodeIds: Set<string> = new Set(), warnings: Map<string, string> = new Map(),
+  marks: Map<string, EdgeMark> = new Map(),
+  highlight: { componentIds: Set<string>; relationIds: Set<string> } | null = null,
 ): { nodes: AaFlowNode[]; edges: AaFlowEdge[] } {
   const view = getView(model, viewId);
   if (!view) return { nodes: [], edges: [] };
 
   const groupIds = new Set(view.nodes.filter(isBox).map((n) => n.id));
+  const viewCount = new Map<string, number>();
+  for (const vv of model.views) for (const cid of new Set(vv.nodes.map((n) => n.componentId).filter(Boolean) as string[])) viewCount.set(cid, (viewCount.get(cid) ?? 0) + 1);
   const nodes: AaFlowNode[] = [];
   for (const n of sortParentsFirst(view.nodes)) {
     const base = {
@@ -77,7 +93,9 @@ export function toFlow(
     if (n.kind === 'component') {
       const c: Component | undefined = n.componentId ? model.components[n.componentId] : undefined;
       if (!c) continue;
-      const data = { componentId: c.id, name: c.name, type: c.type, technology: c.technology, ...(warnings.has(n.id) ? { warning: warnings.get(n.id) } : {}) };
+      const shared = viewCount.get(c.id) ?? 0;
+      const dim = highlight && !highlight.componentIds.has(c.id) ? { dimmed: true } : {};
+      const data = { componentId: c.id, name: c.name, type: c.type, technology: c.technology, ...(warnings.has(n.id) ? { warning: warnings.get(n.id) } : {}), ...(shared > 1 ? { sharedViews: shared } : {}), ...dim };
       if (isBox(n)) {
         const trust = typeof c.properties?.trust === 'string' ? (c.properties.trust as string) : undefined;
         nodes.push({
@@ -111,7 +129,7 @@ export function toFlow(
       const edge: AaFlowEdge = {
         id: e.id, source, target, type: 'relation',
         sourceHandle: e.sourceHandle, targetHandle: e.targetHandle,
-        data: { relationId: r.id, protocol: r.protocol, label: r.label, mode: r.mode },
+        data: { relationId: r.id, protocol: r.protocol, label: r.label, mode: r.mode, relation: r, ...(marks.has(r.id) ? { mark: marks.get(r.id) } : {}), ...(highlight && !highlight.relationIds.has(r.id) ? { dimmed: true } : {}) },
       };
       return edge;
     })

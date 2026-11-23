@@ -17,6 +17,9 @@ export function summaryParts(s: DiffSummary | null | undefined): string[] {
     [s.nodesReparented, `그룹 이동 ${s.nodesReparented}`],
     [s.viewChanges, `화면 표현 ${s.viewChanges}`],
     [s.strategiesChanged ?? 0, `배포 전략 ${s.strategiesChanged}`],
+    [s.flowsAdded ?? 0, `+ API Flow ${s.flowsAdded}`],
+    [s.flowsRemoved ?? 0, `− API Flow ${s.flowsRemoved}`],
+    [s.flowsModified ?? 0, `~ API Flow ${s.flowsModified}`],
   ];
   return parts.filter(([n]) => n > 0).map(([, text]) => text);
 }

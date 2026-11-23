@@ -14,7 +14,7 @@ export interface ArchitectureModel {
   components: Record<string, Component>;   // key = componentId
   relations: Record<string, Relation>;     // key = relationId
   views: View[];
-  flows?: Record<string, unknown>;         // Phase 2 (API Flow)
+  flows?: Record<string, ApiFlow>;         // Sprint 8 (API Flow, D-25)
 }
 
 /** 도메인 엔티티 — 버전 안에서 유일 ('cmp_…') */
@@ -41,8 +41,33 @@ export interface Relation {
   protocol?: Protocol;
   mode?: 'sync' | 'async';
   label?: string;
+  // Sprint 8 (REL-05·06, D-26): calls 운영·보안 속성 — 값 칸 없음(유형만)
+  timeoutMs?: number;
+  retry?: { max: number; backoff: RetryBackoff };
+  onFailure?: OnFailure;
+  credential?: Credential;
+  dataClass?: DataClass;
   requirementIds: string[];
 }
+/** API Flow (Sprint 8 · 03 ApiFlow · D-25). 본문 participant id = componentId */
+export interface ApiFlow {
+  id: string;                                   // 'flw_' + 영숫자 10
+  name: string;
+  endpoint?: { method: HttpMethod; path: string };
+  description?: string;
+  participantIds: string[];                     // Logical 컴포넌트, 순서 = participant 순서
+  outcomes: FlowOutcome[];
+  requirementIds: string[];
+  auth?: { tokenIssuer?: string; tokenVerifier?: string; dataAccessor?: string };
+  mermaid: string;
+}
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+export interface FlowOutcome { id: string; kind: 'success' | 'failure'; label: string; cause?: OutcomeCause }
+export type OutcomeCause = 'auth' | 'validation' | 'timeout' | 'dependency_down' | 'queue_retry' | 'other';
+export type RetryBackoff = 'none' | 'fixed' | 'exponential';
+export type OnFailure = 'propagate' | 'fallback' | 'queue_retry' | 'ignore';
+export type Credential = 'none' | 'session-cookie' | 'jwt-bearer' | 'api-key' | 'service-role' | 'mtls';
+export type DataClass = 'public' | 'internal' | 'personal' | 'sensitive';
 
 /** View — 표현 계층 ('view_…') */
 export interface View {
@@ -121,6 +146,8 @@ export type DiffSummary =
       componentsAdded: number; componentsRemoved: number; componentsModified: number; requirementLinksChanged: number;
       relationsAdded: number; relationsRemoved: number; relationsModified: number;
       nodesReparented: number; viewChanges: number; layoutOnly: number; requirementsChanged: number;
+      /** Sprint 8: API Flow (이전 버전에는 없음 — 0으로 읽는다) */
+      flowsAdded?: number; flowsRemoved?: number; flowsModified?: number;
       /** Sprint 7: 같은 배치안의 배포 전략 변경·삭제 (이전 버전에는 없음) */
       strategiesChanged?: number;
     };
@@ -147,14 +174,19 @@ export type CompareChange =
   | { kind: 'component.modified'; componentId: string; name: string; type: string; fields: FieldChange[]; viewIds: string[] }
   | { kind: 'component.requirements'; componentId: string; name: string; added: string[]; removed: string[]; viewIds: string[] }
   | { kind: 'relation.added' | 'relation.removed'; relationId: string; relationType: string; from: string; to: string; fromId: string; toId: string; protocol: string | null }
-  | { kind: 'relation.modified'; relationId: string; relationType: string; from: string; to: string; fromId: string; toId: string; fields: FieldChange[] }
+  | { kind: 'relation.modified'; relationId: string; relationType: string; from: string; to: string; fromId: string; toId: string; fields: FieldChange[]; security?: true }
   | { kind: 'relation.requirements'; relationId: string; relationType: string; from: string; to: string; fromId: string; toId: string; added: string[]; removed: string[] }
   | { kind: 'view.added' | 'view.removed'; viewId: string; viewKind: string; variant: string }
   | { kind: 'view.renamed'; viewId: string; viewKind: string; before: string; after: string }
   | { kind: 'view.strategy'; viewId: string; variant: string; change: 'added' | 'modified' | 'removed' }
   | { kind: 'view.node.added' | 'view.node.removed' | 'layout.moved' | 'layout.resized'; viewId: string; nodeId: string; name: string }
   | { kind: 'view.node.reparented'; viewId: string; nodeId: string; name: string; before: string | null; after: string | null }
-  | { kind: 'requirement.snapshot_changed'; code: string; change: 'added' | 'modified' | 'removed'; fields: FieldChange[] };
+  | { kind: 'requirement.snapshot_changed'; code: string; change: 'added' | 'modified' | 'removed'; fields: FieldChange[] }
+  // Sprint 8: API Flow
+  | { kind: 'flow.added' | 'flow.removed'; flowId: string; name: string; endpoint: string | null }
+  | { kind: 'flow.modified'; flowId: string; name: string; fields: FieldChange[] }
+  | { kind: 'flow.requirements'; flowId: string; name: string; added: string[]; removed: string[] }
+  | { kind: 'flow.mermaid'; flowId: string; name: string };
 export interface CompareViewMeta { id: string; kind: string; name: string; variant: string | null }
 export interface CompareResult {
   from: { type: 'version'; id: string; label: string; versionNo: number; createdAt: string };
@@ -224,7 +256,7 @@ export type ExportBasis =
   | { source: 'version'; versionId: string; label: string; versionNo: number; publishedAt: string; readAt: string };
 
 // ── README.md 내보내기 (Sprint 4 Step 5) ──
-export type ReadmeSections = { overview: boolean; logicalDiagram: boolean; nfr: boolean; deployment: boolean; deployStrategy: boolean };
+export type ReadmeSections = { overview: boolean; logicalDiagram: boolean; nfr: boolean; deployment: boolean; deployStrategy: boolean; /** Sprint 8: 고른 흐름 id */ apiFlows?: string[] };
 export interface ReadmeExportRequest {
   format: 'readme-md';
   source?: ExportSource;
@@ -248,7 +280,8 @@ export type AskAiScope =
   | { type: 'project' }
   | { type: 'view'; viewId: 'view_logical' }
   | { type: 'components'; componentIds: string[] }
-  | { type: 'requirement'; requirementId: string };
+  | { type: 'requirement'; requirementId: string }
+  | { type: 'flow'; flowId: string };
 export interface AskAiExportRequest {
   format: AskAiFormat;
   source?: { type: 'draft' } | { type: 'version'; versionId: string };
@@ -337,7 +370,10 @@ export interface Requirement {
   priority: RequirementPriority;
   status: RequirementStatus;
   sortOrder: number;
+  /** Sprint 8 (REQ-06): NFR 측정 기준. 없으면 {} */
+  measurement?: RequirementMeasurement;
 }
+export interface RequirementMeasurement { flowId?: string; endpoint?: string; environment?: string; load?: string; method?: string }
 
 export type RequirementUpdate = Partial<Omit<Requirement, 'id' | 'code' | 'kind'>>;
 export type RequirementCreate = RequirementUpdate & Pick<Requirement, 'kind' | 'title'>;
