@@ -4,6 +4,7 @@ import { useState } from 'react';
 import MarkdownPreview from '@/components/MarkdownPreview';
 import { StudioNotes } from './StudioNotes';
 import type { Component, PropertyDef, Relation } from '@/lib/aa/architecture-types';
+import { OPS_RELATION_LABEL, OPS_RELATION_TYPES, isOpsRelationType, type OpsRelationType } from '@/lib/aa/ops-relations';
 import {
   componentPlacements, componentTextError, CREDENTIALS, customKeyError, DATA_CLASSES, deploymentViewSummary, ON_FAILURE, PROTOCOLS, RELATION_MODES, RETRY_BACKOFFS, realizesTargets, relationAttrError, relationFieldError, relationSummary, runLocations, STRATEGY_MAX_BYTES,
 } from '@/lib/aa/model-ops';
@@ -84,6 +85,7 @@ export default function PropertyInspector({ edits }: { edits: InspectorEdits }) 
       <div style={mono}>{relation.id}</div>
       <div style={muted}>관계 유형: {relation.type}</div>
       {relation.type === 'calls' && <RelationEditor key={`${s.projectId}:${relation.id}`} relation={relation} edits={edits} />}
+      {isOpsRelationType(relation.type) && <OpsRelationEditor key={`${s.projectId}:${relation.id}`} relation={relation} />}
     </>;
   } else if (view?.kind === 'deployment') {
     body = <DeploymentSummary key={`${s.projectId}:${view.id}`} edits={edits} />;
@@ -243,6 +245,23 @@ function CustomProperties({ component, definitions }: { component: Component; de
         </form>
       ) : <button style={button} onClick={() => setEntry({ key: '', value: '' })}>자유 속성 추가</button>}
     </section>
+  );
+}
+
+/** Sprint 11 (OPS-02): 운영 설계 관계 — 유형(7종)만 고르고 요구사항을 잇는다. protocol·mode 없음(V17) */
+function OpsRelationEditor({ relation }: { relation: Relation }) {
+  const setType = useStudio((s) => s.setRelationType);
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+        <span style={{ color: 'rgba(255,255,255,0.55)' }}>운영 설계 관계 유형</span>
+        <select data-testid="aa-ops-relation-type" value={relation.type} onChange={(e) => setType(relation.id, e.target.value as OpsRelationType)}
+          style={{ background: '#141417', color: '#e8e6e1', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, padding: '5px 8px', fontSize: 12.5 }}>
+          {OPS_RELATION_TYPES.map((t) => <option key={t} value={t}>{OPS_RELATION_LABEL[t]} ({t})</option>)}
+        </select>
+      </label>
+      <RequirementLinks target="relations" id={relation.id} linked={relation.requirementIds} />
+    </div>
   );
 }
 

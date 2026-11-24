@@ -4,6 +4,7 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { ArchitectureModel, Component, Relation, View, ViewNode } from './architecture-types';
 import type { EdgeMark } from './boundary';
+import { relationLayer, type RelationLayer } from './ops-relations.ts';
 
 export type ComponentNodeData = {
   componentId: string;
@@ -39,6 +40,8 @@ export type RelationEdgeData = {
   mark?: EdgeMark;
   /** Sprint 8 (FLW-06): 흐름 강조 중 강조 대상이 아닌 엣지 */
   dimmed?: boolean;
+  /** Sprint 11 (OPS-02·06): 선 구분·레이어 토글 단위 */
+  layer?: RelationLayer;
 };
 export type AaFlowEdge = Edge<RelationEdgeData, 'relation'>;
 
@@ -76,6 +79,7 @@ export function toFlow(
   model: ArchitectureModel, viewId: string, selectedNodeIds: Set<string> = new Set(), warnings: Map<string, string> = new Map(),
   marks: Map<string, EdgeMark> = new Map(),
   highlight: { componentIds: Set<string>; relationIds: Set<string> } | null = null,
+  hiddenLayers: ReadonlySet<RelationLayer> = new Set(),
 ): { nodes: AaFlowNode[]; edges: AaFlowEdge[] } {
   const view = getView(model, viewId);
   if (!view) return { nodes: [], edges: [] };
@@ -127,10 +131,12 @@ export function toFlow(
       const source = nodeByComponent.get(r.from);
       const target = nodeByComponent.get(r.to);
       if (!source || !target) return null;
+      const layer = relationLayer(r.type);
       const edge: AaFlowEdge = {
         id: e.id, source, target, type: 'relation',
+        ...(hiddenLayers.has(layer) ? { hidden: true } : {}),
         sourceHandle: e.sourceHandle, targetHandle: e.targetHandle,
-        data: { relationId: r.id, protocol: r.protocol, label: r.label, mode: r.mode, relation: r, ...(marks.has(r.id) ? { mark: marks.get(r.id) } : {}), ...(highlight && !highlight.relationIds.has(r.id) ? { dimmed: true } : {}) },
+        data: { relationId: r.id, protocol: r.protocol, label: r.label, mode: r.mode, relation: r, layer, ...(marks.has(r.id) ? { mark: marks.get(r.id) } : {}), ...(highlight && !highlight.relationIds.has(r.id) ? { dimmed: true } : {}) },
       };
       return edge;
     })

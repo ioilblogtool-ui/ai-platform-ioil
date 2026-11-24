@@ -2,6 +2,9 @@
 
 // Architecture Studio 상태 (D-05 Zustand). 도메인 모델이 진실의 원천이다 (02 §3.1, §5).
 // 모델 변경은 model-ops를 사용한다. 자동 저장과 수동 저장은 같은 revision 경로를 거친다.
+import type { OpsRelationType } from './ops-relations';
+// Sprint 11: 조회·저장 때마다 다시 계산하는 배치 경고 (V11 Process 위치 · V16 AWS · V19 VM 복귀)
+const PLACEMENT_RULES = new Set(['V11', 'V16', 'V19']);
 import { create } from 'zustand';
 import type { Connection, EdgeChange, NodeChange } from '@xyflow/react';
 import type { ValidationIssue, VersionRef, ArchitectureModel, Requirement, TypeRegistry } from './architecture-types';
@@ -60,6 +63,10 @@ type StudioState = {
   /** 로드 시 정리한 흐름 참조 (Q12) — removed: 뺀 참여·역할 수, underTwo: 유효 참여가 2개 미만인 흐름 */
   flowRepair: { removed: number; underTwo: string[] } | null;
   detachedClustersOnLoad: number;
+  /** Sprint 11: 불러올 때 비운 VM 복귀 대상 수·지운 운영 설계 관계 수 (C2·V17) */
+  opsRepairOnLoad: { fallbackCleared: number; opsRemoved: number };
+  /** Sprint 11: 운영 설계 관계 유형 바꾸기 (7종 안에서) */
+  setRelationType: (id: string, type: OpsRelationType) => void;
 
   backupMessage: string | null;
   recovery: ReturnType<typeof readDraftBackup>;
@@ -236,7 +243,7 @@ export const useStudio = create<StudioState>((set, get) => {
         conflictRevision: null,
         saveState: edited ? 'dirty' : 'saved',
         saveMessage: res.warnings.length ? `경고 ${res.warnings.length}건` : null,
-          placementWarnings: res.warnings.filter((w) => w.rule === 'V11' || w.rule === 'V16'),
+          placementWarnings: res.warnings.filter((w) => PLACEMENT_RULES.has(w.rule)),
       });
       if (edited) {
         backup();
@@ -496,6 +503,7 @@ export const useStudio = create<StudioState>((set, get) => {
     highlightFlowId: null,
     flowRepair: null,
     detachedClustersOnLoad: 0,
+    opsRepairOnLoad: { fallbackCleared: 0, opsRemoved: 0 },
 
     backupMessage: null,
     recovery: null,
@@ -518,7 +526,7 @@ export const useStudio = create<StudioState>((set, get) => {
       set({
         projectId, saveState: 'loading', loadError: null, model: null, past: [], future: [],
         selectedNodeIds: [], selectedEdgeIds: [], pendingDelete: null,
-        panel: 'canvas', selectedFlowId: null, highlightFlowId: null, flowRepair: null, detachedClustersOnLoad: 0,
+        panel: 'canvas', selectedFlowId: null, highlightFlowId: null, flowRepair: null, detachedClustersOnLoad: 0, opsRepairOnLoad: { fallbackCleared: 0, opsRemoved: 0 },
         conflictRevision: null, saveMessage: null, backupMessage: null, recovery: null, reloading: false,
         requirements: [], requirementsError: null, importing: false, importUndo: null,
       });
@@ -543,13 +551,14 @@ export const useStudio = create<StudioState>((set, get) => {
         }
         // Sprint 8 (Q12): 끊긴 흐름 참여·역할 정리. 참여가 2개 미만인 흐름은 지우지 않고 안내만
         const repaired = flowOps.repairFlows(draft.model);
-        const clusters = ops.repairClusterRefs(repaired.model);
+        const clusters = ops.repairOnLoad(repaired.model);
         committedModel = draft.model;
         set({
           detachedClustersOnLoad: recovery ? 0 : clusters.detached,
+          opsRepairOnLoad: recovery ? { fallbackCleared: 0, opsRemoved: 0 } : { fallbackCleared: clusters.fallbackCleared, opsRemoved: clusters.opsRemoved },
           flowRepair: repaired.removed || repaired.underTwo.length ? { removed: repaired.removed, underTwo: repaired.underTwo } : null,
           projectName: project.name, model: draft.model, baseRevision: draft.revision, baseVersion: draft.baseVersion,
-          viewId: 'view_logical', placementWarnings: (draft.warnings ?? []).filter((w) => w.rule === 'V11' || w.rule === 'V16'), focusNodeId: null,
+          viewId: 'view_logical', placementWarnings: (draft.warnings ?? []).filter((w) => PLACEMENT_RULES.has(w.rule)), focusNodeId: null,
           registry, saveState: 'saved', editSeq: 0, recovery, backupMessage,
         });
         void get().loadRequirements();
@@ -567,9 +576,9 @@ export const useStudio = create<StudioState>((set, get) => {
       if (!recovery) return;
       ownedBackup = recovery.raw;
       const older = recovery.value.revision < baseRevision;
-      const clusters = ops.repairClusterRefs(recovery.value.model);
+      const clusters = ops.repairOnLoad(recovery.value.model);
       set({
-        model: clusters.model, detachedClustersOnLoad: clusters.detached, past: [], future: [], importUndo: null,
+        model: clusters.model, detachedClustersOnLoad: clusters.detached, opsRepairOnLoad: { fallbackCleared: clusters.fallbackCleared, opsRemoved: clusters.opsRemoved }, past: [], future: [], importUndo: null,
         recovery: null,
         saveState: older ? 'conflict' : 'dirty',
         conflictRevision: older ? baseRevision : null,
@@ -582,9 +591,9 @@ export const useStudio = create<StudioState>((set, get) => {
       if (!recovery) return;
       clearBackup(recovery.raw);
       const model = get().model;
-      const repaired = model ? ops.repairClusterRefs(model) : null;
-      set({ recovery: null, ...(repaired && { model: repaired.model, detachedClustersOnLoad: repaired.detached }) });
-      if (repaired?.detached) commitEdit();
+      const repaired = model ? ops.repairOnLoad(model) : null;
+      set({ recovery: null, ...(repaired && { model: repaired.model, detachedClustersOnLoad: repaired.detached, opsRepairOnLoad: { fallbackCleared: repaired.fallbackCleared, opsRemoved: repaired.opsRemoved } }) });
+      if (repaired && repaired.model !== model) commitEdit();
     },
 
     async reloadServer() {
@@ -599,16 +608,17 @@ export const useStudio = create<StudioState>((set, get) => {
         committedModel = draft.model;
         changedDuringGesture = false;
         pausedForAuth = false;
-        const clusters = ops.repairClusterRefs(draft.model);
+        const clusters = ops.repairOnLoad(draft.model);
         set({
           detachedClustersOnLoad: clusters.detached,
+          opsRepairOnLoad: { fallbackCleared: clusters.fallbackCleared, opsRemoved: clusters.opsRemoved },
           model: clusters.model, baseRevision: draft.revision, baseVersion: draft.baseVersion, saveState: 'saved',
           viewId: draft.model.views.some((v) => v.id === get().viewId) ? get().viewId : 'view_logical',
-          placementWarnings: (draft.warnings ?? []).filter((w) => w.rule === 'V11' || w.rule === 'V16'),
+          placementWarnings: (draft.warnings ?? []).filter((w) => PLACEMENT_RULES.has(w.rule)),
           conflictRevision: null, reloading: false, selectedNodeIds: [], selectedEdgeIds: [],
           pendingDelete: null, editSeq: 0, past: [], future: [], importUndo: null,
         });
-        if (clusters.detached) commitEdit();
+        if (clusters.model !== draft.model) commitEdit();
       } catch (error) {
         if (session !== currentSession) return;
         set({ reloading: false, saveMessage: (error as Error).message });
@@ -766,6 +776,10 @@ export const useStudio = create<StudioState>((set, get) => {
       edit((m) => ops.updateRelationField(m, id, field, value));
     },
 
+    setRelationType(id, type) {
+      edit((m) => ops.setRelationType(m, id, type));
+    },
+
     setRequirementLink(target, id, requirementId, on) {
       edit((m) => ops.setRequirementLink(m, target, id, requirementId, on));
     },
@@ -857,7 +871,7 @@ export const useStudio = create<StudioState>((set, get) => {
         set({
           model: built.model, baseRevision: res.revision, saveState: 'saved', conflictRevision: null,
           saveMessage: res.warnings.length ? `경고 ${res.warnings.length}건` : null,
-          placementWarnings: res.warnings.filter((w) => w.rule === 'V11' || w.rule === 'V16'),
+          placementWarnings: res.warnings.filter((w) => PLACEMENT_RULES.has(w.rule)),
           past: appendHistory(state.past, latest), future: [],
           importUndo: { model: latest, revision: res.revision, summary: built.summary },
           selectedNodeIds: [], selectedEdgeIds: [],

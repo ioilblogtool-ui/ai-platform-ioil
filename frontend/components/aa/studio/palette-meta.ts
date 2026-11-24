@@ -10,6 +10,7 @@ export const CATEGORY_COLOR: Record<string, string> = {
   deployment: '#5ec4b6',
   aws: '#ffb547',
   kubernetes: '#82aaff',
+  operations: '#3ecf8e',   // Sprint 11 운영 설계
 };
 
 // 배치안 신뢰 구역 색 (04 §6.10: external 회색 · dmz 보라 · internal teal · data 파랑)
@@ -50,6 +51,15 @@ export const TYPE_FALLBACK: Record<string, { icon: string; category: string }> =
   'dep.managed_db': { icon: '⛁', category: 'deployment' },
   'dep.managed_auth': { icon: '⚿', category: 'deployment' },
   'dep.process': { icon: '⚙', category: 'deployment' },
+  // Sprint 11 운영 설계 (레지스트리 v5와 같은 아이콘)
+  'ops.metrics': { icon: '📈', category: 'operations' },
+  'ops.alerting': { icon: '🔔', category: 'operations' },
+  'ops.collector': { icon: '⇲', category: 'operations' },
+  'ops.telemetry': { icon: '🐾', category: 'operations' },
+  'ops.ci': { icon: '⚙', category: 'operations' },
+  'ops.registry': { icon: '▤', category: 'operations' },
+  'ops.config_repo': { icon: '⎇', category: 'operations' },
+  'ops.gitops': { icon: '⟳', category: 'operations' },
 };
 
 export const DND_MIME = 'application/aa-type';
@@ -68,7 +78,7 @@ export function paletteItems(registry: TypeRegistry | null, viewKind: string, qu
   if (!registry) {
     for (const [type, f] of Object.entries(TYPE_FALLBACK)) {
       // 레지스트리가 없을 때: 배치안 타입은 배치안에서만, 나머지는 Logical에서만
-      const view = f.category === 'aws' || f.category === 'kubernetes' || f.category === 'deployment' ? f.category : 'logical';
+      const view = f.category === 'operations' ? 'deployment' : f.category === 'aws' || f.category === 'kubernetes' || f.category === 'deployment' ? f.category : 'logical';
       if (view !== viewKind && type !== 'group' && type !== 'note') continue;
       if (!q || type.includes(q)) out.push({ type, label: type, icon: f.icon, category: f.category, nodeKind: type === 'group' || type === 'note' ? type : 'component' });
     }

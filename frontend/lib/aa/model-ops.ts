@@ -2,7 +2,8 @@
 // 모든 함수는 입력 모델을 바꾸지 않고 새 모델을 돌려준다. 바꿀 것이 없거나 거부되면 입력 모델을 그대로 돌려준다.
 //
 // 좌표 기준: parentId가 있으면 position은 부모 그룹 좌상단 기준 상대 좌표, 없으면 캔버스 절대 좌표 (React Flow sub-flow와 같음).
-import type { ArchitectureModel, Component, PropertyDef, Relation, RetryBackoff, TypeRegistry, View, ViewNode } from './architecture-types';
+import type { ArchitectureModel, Component, PropertyDef, Relation, RelationType, RetryBackoff, TypeRegistry, View, ViewNode } from './architecture-types';
+import { defaultRelationType, isOpsRelationType, pruneOrphanOpsRelations, repairOpsRelations, type OpsRelationType } from './ops-relations.ts';
 
 export type NewId = (prefix: 'cmp' | 'rel' | 'nd' | 'ed' | 'view') => string;
 export type Point = { x: number; y: number };
@@ -113,6 +114,16 @@ export function relationFieldError(field: 'protocol' | 'mode' | 'label', value: 
   if (field === 'mode' && !RELATION_MODES.some((entry) => entry === value)) return '동기 또는 비동기를 선택하세요.';
   if (field === 'label' && value.length > 500) return '라벨은 500자 이하여야 합니다.';
 }
+
+/** Sprint 11: 운영 설계 관계의 유형 바꾸기 (7종 안에서만) */
+export function setRelationType(model: ArchitectureModel, id: string, type: OpsRelationType): ArchitectureModel {
+  const relation = model.relations[id];
+  if (!relation || !isOpsRelationType(relation.type) || !isOpsRelationType(type) || relation.type === type) return model;
+  return { ...model, relations: { ...model.relations, [id]: { ...relation, type: type as RelationType } } };
+}
+
+/** 배치안 종류별 "그 배치안의 컴포넌트" layer — deployment 배치안은 운영 설계(ops) 컴포넌트도 가진다 (Sprint 11) */
+const layerOf = (kind: string): string[] => (kind === 'deployment' ? ['deployment', 'ops'] : [kind]);
 
 export function updateRelationField(model: ArchitectureModel, id: string, field: 'protocol' | 'mode' | 'label', value: string): ArchitectureModel {
   const relation = model.relations[id];
@@ -295,6 +306,19 @@ export type ReferenceCandidate = { componentId: string; name: string; type: stri
 const viewLabel = (v: View) => (v.kind === 'deployment' ? v.variant ?? v.name : v.name);
 
 /** 지금 View에 놓을 수 있는 다른 View의 컴포넌트 — 레지스트리 views가 이 View 종류를 허용하고, 이 View에 노드가 없는 것. 고아 먼저 */
+/**
+ * 참조 노드로 놓을 수 있는가: 레지스트리가 그 View 종류를 허용하거나,
+ * (Sprint 11, 08 D-45 Q1) **운영 설계 배치안**(ops 컴포넌트 노드가 하나 이상 있는 deployment 배치안)에 Logical 컴포넌트를 놓는 경우.
+ * 일반 배치안(VM·PaaS)은 Sprint 8(VIEW-05) 규칙 그대로 Logical을 받지 않는다.
+ */
+export const isOpsDesignView = (model: ArchitectureModel, view: View | undefined) =>
+  view?.kind === 'deployment' && view.nodes.some((n) => n.componentId && model.components[n.componentId]?.layer === 'ops');
+
+function canReference(model: ArchitectureModel, c: Component, view: View, registry: TypeRegistry | null): boolean {
+  if (registry?.types[c.type]?.views?.includes(view.kind as never)) return true;
+  return c.layer === 'logical' && Boolean(registry?.types[c.type]) && isOpsDesignView(model, view);
+}
+
 export function referenceCandidates(model: ArchitectureModel, viewId: string, registry: TypeRegistry | null): ReferenceCandidate[] {
   const view = getView(model, viewId);
   if (!view) return [];
@@ -302,8 +326,7 @@ export function referenceCandidates(model: ArchitectureModel, viewId: string, re
   const out: ReferenceCandidate[] = [];
   for (const c of Object.values(model.components)) {
     if (here.has(c.id) || c.type === 'aws.eks') continue;
-    const allowed = registry?.types[c.type]?.views;
-    if (!allowed || !allowed.includes(view.kind)) continue;
+    if (!canReference(model, c, view, registry)) continue;
     const views = model.views.filter((v) => v.nodes.some((n) => n.componentId === c.id)).map((v) => ({ id: v.id, label: viewLabel(v) }));
     out.push({ componentId: c.id, name: c.name, type: c.type, views, orphan: views.length === 0 });
   }
@@ -318,7 +341,7 @@ export function addReferenceNode(
   const view = getView(model, viewId);
   if (!c || c.type === 'aws.eks' || !view || view.nodes.some((n) => n.componentId === componentId)) return { model, nodeId: null };
   const def = registry?.types[c.type];
-  if (!def?.views?.includes(view.kind)) return { model, nodeId: null };
+  if (!def || !canReference(model, c, view, registry)) return { model, nodeId: null };
   let nodeId: string | null = null;
   const next = withView(model, viewId, (_m, v) => {
     nodeId = newId('nd');
@@ -433,10 +456,15 @@ export function connect(
     const from = v.nodes.find((n) => n.id === sourceNodeId && n.kind === 'component')?.componentId;
     const to = v.nodes.find((n) => n.id === targetNodeId && n.kind === 'component')?.componentId;
     if (!from || !to || from === to) return false;
-    // 같은 from/to calls 관계가 있으면 재사용 (02 §6.2)
-    let rel: Relation | undefined = Object.values(m.relations).find((r) => r.type === 'calls' && r.from === from && r.to === to);
+    // Sprint 11 (V17): 한쪽이 운영 설계(ops) 컴포넌트면 운영 설계 관계. deployment View에서만 그릴 수 있다
+    const opsType = defaultRelationType(m.components[from], m.components[to]);
+    if (opsType && v.kind !== 'deployment') return false;
+    // 같은 from/to 관계(calls 또는 운영 설계 관계)가 있으면 재사용 (02 §6.2)
+    let rel: Relation | undefined = Object.values(m.relations).find((r) => r.from === from && r.to === to && (opsType ? isOpsRelationType(r.type) : r.type === 'calls'));
     if (!rel) {
-      rel = { id: newId('rel'), type: 'calls', from, to, protocol: 'HTTP', mode: 'sync', requirementIds: [] };
+      rel = opsType
+        ? { id: newId('rel'), type: opsType, from, to, requirementIds: [] }
+        : { id: newId('rel'), type: 'calls', from, to, protocol: 'HTTP', mode: 'sync', requirementIds: [] };
       m.relations[rel.id] = rel;
     }
     relationId = rel.id;
@@ -509,6 +537,7 @@ export function removeNodes(
       for (const cid of cids) deleteComponent(m, cid);
     }
     pruneEdges(m, v);
+    pruneOrphanOpsRelations(m);   // Sprint 11 (V17): 마지막 표시 엣지가 사라진 운영 설계 관계도 함께
   });
 }
 
@@ -545,6 +574,7 @@ export function removeEdges(
     const gone = v.edges.filter((e) => edgeIds.includes(e.id));
     if (!gone.length) return false;
     v.edges = v.edges.filter((e) => !edgeIds.includes(e.id));
+    pruneOrphanOpsRelations(m);   // Sprint 11 (V17): 운영 설계 관계는 엣지 없이 남을 수 없다
     if (!opts.deleteRelations) return;
     for (const e of gone) {
       const usedElsewhere = m.views.some((vv) => vv.edges.some((x) => x.relationId === e.relationId));
@@ -848,7 +878,7 @@ function ownComponents(model: ArchitectureModel, viewId: string): Set<string> {
   const ids = new Set<string>();
   for (const n of v.nodes) {
     const c = n.componentId ? model.components[n.componentId] : undefined;
-    if (!c || c.layer !== v.kind) continue;
+    if (!c || !layerOf(v.kind).includes(c.layer)) continue;
     if (model.views.some((o) => o.id !== viewId && o.nodes.some((x) => x.componentId === c.id))) continue;
     ids.add(c.id);
   }
@@ -879,7 +909,7 @@ function duplicatePlacementView(model: ArchitectureModel, viewId: string, varian
   const compMap = new Map<string, string>();
   for (const n of src.nodes) {
     const c = n.componentId ? next.components[n.componentId] : undefined;
-    if (!c || c.layer !== src.kind || compMap.has(c.id)) continue;
+    if (!c || !layerOf(src.kind).includes(c.layer) || compMap.has(c.id)) continue;
     const copy = structuredClone(c);
     copy.id = newId('cmp');
     next.components[copy.id] = copy;
@@ -890,7 +920,9 @@ function duplicatePlacementView(model: ArchitectureModel, viewId: string, varian
     const from = compMap.get(r.from) ?? null;
     const to = compMap.get(r.to) ?? null;
     if (!from && !to) continue;                                      // 이 배치안과 무관
-    if (r.type !== 'realizes' && (!from || !to)) continue;            // 배치안 밖으로 이어진 호출선은 복사하지 않음
+    // 배치안 밖으로 이어진 호출선은 복사하지 않는다. Sprint 11: 이 배치안에 참조 노드로 놓인 공유 컴포넌트(예: Logical 조회 API)와 잇는 관계는 복사
+    const shownHere = (cid: string) => src.nodes.some((n) => n.componentId === cid);
+    if (r.type !== 'realizes' && (!(from || shownHere(r.from)) || !(to || shownHere(r.to)))) continue;
     const copy = structuredClone(r);
     copy.id = newId('rel');
     copy.from = from ?? r.from;
@@ -903,6 +935,7 @@ function duplicatePlacementView(model: ArchitectureModel, viewId: string, varian
   next.views.push({
     id: newViewIdValue, kind: src.kind, name: src.name, variant: variant.trim(),
     ...(src.strategyMd ? { strategyMd: src.strategyMd } : {}),
+    ...(src.strategy ? { strategy: structuredClone(src.strategy) } : {}),   // Sprint 11: 복귀 대상은 원본과 같게
     nodes: src.nodes.map((n) => {
       const copy: ViewNode = structuredClone(n);
       copy.id = nodeMap.get(n.id)!;
@@ -935,7 +968,39 @@ function removePlacementView(model: ArchitectureModel, viewId: string, kind: 'de
   const next = cloneModel(model);
   next.views = next.views.filter((x) => x.id !== viewId);
   for (const id of own) deleteComponent(next, id);
+  clearFallbackTarget(next, viewId);   // Sprint 11 (C2): 복귀 대상만 비우고 정책 문구는 남긴다
+  pruneOrphanOpsRelations(next);
   return next;
+}
+
+/** 이 배치안을 VM 복귀 대상으로 쓰는 전략 수 (삭제 확인 창 안내) */
+export function fallbackReferrers(model: ArchitectureModel, viewId: string): string[] {
+  return model.views.filter((v) => v.strategy?.fallback?.targetViewId === viewId).map((v) => v.variant ?? v.name);
+}
+
+function clearFallbackTarget(m: ArchitectureModel, viewId: string) {
+  for (const v of m.views) if (v.strategy?.fallback?.targetViewId === viewId) delete v.strategy.fallback.targetViewId;
+}
+
+/**
+ * 불러올 때 한 번에 하는 정리 (Sprint 10 clusterRef + Sprint 11 C2·V17). 입력 모델은 그대로.
+ * detached = 끊긴 EKS 연결, fallbackCleared = 끊긴 VM 복귀 대상, opsRemoved = 표시 엣지 없는 운영 설계 관계
+ */
+export function repairOnLoad(model: ArchitectureModel): { model: ArchitectureModel; detached: number; fallbackCleared: number; opsRemoved: number } {
+  const clusters = repairClusterRefs(model);
+  const fallback = repairFallbackTargets(clusters.model);
+  const opsRels = repairOpsRelations(fallback.model);
+  return { model: opsRels.model, detached: clusters.detached, fallbackCleared: fallback.cleared, opsRemoved: opsRels.removed };
+}
+
+/** Draft 복구용: 없는 배치안이나 deployment가 아닌 View를 가리키는 복귀 대상을 비운다 (C2). 입력 모델은 그대로 */
+export function repairFallbackTargets(model: ArchitectureModel): { model: ArchitectureModel; cleared: number } {
+  const ok = new Set(model.views.filter((v) => v.kind === 'deployment').map((v) => v.id));
+  const broken = model.views.filter((v) => v.strategy?.fallback?.targetViewId !== undefined && !ok.has(v.strategy.fallback.targetViewId));
+  if (!broken.length) return { model, cleared: 0 };
+  const next = cloneModel(model);
+  for (const v of next.views) if (v.strategy?.fallback?.targetViewId !== undefined && !ok.has(v.strategy.fallback.targetViewId)) delete v.strategy.fallback.targetViewId;
+  return { model: next, cleared: broken.length };
 }
 
 /** 삭제 확인 창용 요약 */

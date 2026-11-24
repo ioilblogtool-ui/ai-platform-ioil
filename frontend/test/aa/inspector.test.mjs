@@ -58,7 +58,7 @@ describe('Inspector model edits', () => {
     const graph = toFlow(edited, 'view_logical');
     assert.equal(graph.nodes.find((node) => node.id === 'nd_a').data.name, 'Reports API');
     const { relation, ...edgeData } = graph.edges[0].data;
-    assert.deepEqual(edgeData, { relationId: 'rel_a', protocol: 'Kafka', mode: 'async', label: 'report.ready' });
+    assert.deepEqual(edgeData, { relationId: 'rel_a', protocol: 'Kafka', mode: 'async', label: 'report.ready', layer: 'api' });   // Sprint 11: 레이어
     assert.equal(relation.id, 'rel_a');
     assert.deepEqual(validateModel(edited).errors, []);
   });

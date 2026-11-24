@@ -66,7 +66,7 @@ describe('RelationEdge 매핑', () => {
     const [e] = toFlow(m, VIEW).edges;
     assert.equal(e.type, 'relation');
     const { relation, ...rest } = e.data;
-    assert.deepEqual(rest, { relationId: c.relationId, protocol: 'Kafka', label: undefined, mode: 'async' });
+    assert.deepEqual(rest, { relationId: c.relationId, protocol: 'Kafka', label: undefined, mode: 'async', layer: 'api' });   // Sprint 11: 레이어
     assert.equal(relation, m.relations[c.relationId], 'Sprint 8: 툴팁용 관계 전체');
   });
 });

@@ -12,6 +12,8 @@ import { flowHighlight } from '@/lib/aa/flow-ops';
 import FlowPanel from './FlowPanel';
 import { edgeMarks, resolveBaseView } from '@/lib/aa/boundary';
 import BoundaryBar, { useBoundaryPrefs } from './BoundaryBar';
+import OpsLayerBar, { hasOpsContent } from './OpsLayerBar';
+import type { RelationLayer } from '@/lib/aa/ops-relations';
 import { shouldWarnOnLeave } from '@/lib/aa/autosave';
 import { modelByteSize } from '@/lib/aa/architecture-api';
 import ComponentNode from './ComponentNode';
@@ -176,7 +178,15 @@ function Studio({ projectId }: { projectId: string }) {
   const marks = useMemo(() => (s.model && boundaryPrefs.show ? edgeMarks(s.model, s.viewId, baseViewId) : new Map()), [s.model, s.viewId, baseViewId, boundaryPrefs.show]);
   // Sprint 8 (FLW-06): 흐름을 고른 채 Logical이면 참여 노드·그 사이 calls만 강조
   const highlight = useMemo(() => (s.model && view?.kind === 'logical' ? flowHighlight(s.model, s.highlightFlowId) : null), [s.model, view?.kind, s.highlightFlowId]);
-  const flow = useMemo(() => (s.model ? toFlow(s.model, s.viewId, selected, warnMap, marks, highlight) : { nodes: [], edges: [] }), [s.model, s.viewId, selected, warnMap, marks, highlight]);
+  // Sprint 11 (OPS-06): 운영 설계 레이어 토글 — 화면 상태(저장 안 함)
+  const [hiddenLayers, setHiddenLayers] = useState<ReadonlySet<RelationLayer>>(() => new Set());
+  const toggleLayer = useCallback((layer: RelationLayer) => setHiddenLayers((cur) => {
+    const next = new Set(cur);
+    if (next.has(layer)) next.delete(layer); else next.add(layer);
+    return next;
+  }), []);
+  const showOpsBar = Boolean(s.model && s.panel === 'canvas' && hasOpsContent(s.model, s.viewId));
+  const flow = useMemo(() => (s.model ? toFlow(s.model, s.viewId, selected, warnMap, marks, highlight, showOpsBar ? hiddenLayers : new Set()) : { nodes: [], edges: [] }), [s.model, s.viewId, selected, warnMap, marks, highlight, showOpsBar, hiddenLayers]);
 
   // Sprint 8: Trace에서 넘어올 때 ?flow=<id>(빈 값이면 흐름 탭) / ?focus=<componentId> — 처음 모델이 왔을 때 한 번
   const deepLinked = useRef(false);
@@ -332,6 +342,7 @@ function Studio({ projectId }: { projectId: string }) {
       </div>
       <ViewTabs edits={edits} />
       {s.model && s.panel === 'canvas' && <BoundaryBar model={s.model} viewId={s.viewId} baseViewId={baseViewId} prefs={boundaryPrefs} />}
+      {showOpsBar && <OpsLayerBar hidden={hiddenLayers} onToggle={toggleLayer} />}
       {highlight && s.panel === 'canvas' && s.model?.flows?.[s.highlightFlowId!] && (
         <div role="status" data-testid="aa-flow-highlight" style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '4px 14px', fontSize: 12, color: '#e9d6b0', background: 'rgba(200,169,110,0.08)', borderBottom: '1px solid rgba(200,169,110,0.2)' }}>
           흐름 강조: <b>{s.model.flows[s.highlightFlowId!].name}</b>
@@ -343,6 +354,12 @@ function Studio({ projectId }: { projectId: string }) {
       {s.detachedClustersOnLoad > 0 && (
         <div role="status" style={{ padding: '6px 14px', color: '#f3c97a' }}>
           끊긴 EKS 연결 {s.detachedClustersOnLoad}개를 해제했습니다. K8s View와 워크로드는 그대로입니다.
+        </div>
+      )}
+      {(s.opsRepairOnLoad.fallbackCleared > 0 || s.opsRepairOnLoad.opsRemoved > 0) && (
+        <div role="status" data-testid="aa-ops-repair" style={{ padding: '6px 14px', color: '#f3c97a' }}>
+          {s.opsRepairOnLoad.fallbackCleared > 0 && <>없는 배치안을 가리키던 VM 복귀 대상 {s.opsRepairOnLoad.fallbackCleared}개를 비웠습니다. 복귀 정책 문구는 그대로입니다. </>}
+          {s.opsRepairOnLoad.opsRemoved > 0 && <>표시 엣지가 없는 운영 설계 관계 {s.opsRepairOnLoad.opsRemoved}개를 정리했습니다.</>}
         </div>
       )}
       {s.backupMessage && <div role="status" style={{ padding: '6px 14px', color: '#f3c97a' }}>{s.backupMessage}</div>}

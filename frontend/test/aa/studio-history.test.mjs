@@ -24,7 +24,7 @@ const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
     if (context.parentURL?.includes('/lib/aa/') && specifier.startsWith('.')) {
       if (['./architecture-api', '../supabase'].includes(specifier)) return { url: mockUrl, shortCircuit: true };
-      return nextResolve(specifier + '.ts', context);
+      return nextResolve(specifier.endsWith('.ts') ? specifier : specifier + '.ts', context);   // Sprint 11: lib끼리 .ts 지정자 허용
     }
     return nextResolve(specifier, context);
   },

@@ -4,8 +4,10 @@
 export const MODEL_SCHEMA_VERSION = 1;
 
 export type ViewKind = 'logical' | 'deployment' | 'kubernetes' | 'aws' | 'apiflow';
-export type ComponentLayer = 'logical' | 'deployment' | 'kubernetes' | 'aws' | 'general';
-export type RelationType = 'calls' | 'realizes' | 'depends_on';
+export type ComponentLayer = 'logical' | 'deployment' | 'kubernetes' | 'aws' | 'general' | 'ops';   // Sprint 11: ops = 운영 설계
+export type RelationType = 'calls' | 'realizes' | 'depends_on'
+  // Sprint 11 (OPS-02, V17): 운영 설계 관계 — 표시 엣지는 deployment View에만
+  | 'scrapes' | 'alerts_to' | 'ships_logs' | 'exports_traces' | 'builds' | 'pushes' | 'syncs';
 export type NodeKind = 'component' | 'group' | 'note';
 export type Protocol = 'HTTP' | 'HTTPS' | 'gRPC' | 'TCP' | 'AMQP' | 'Kafka' | 'JDBC' | 'RESP' | 'Other';
 
@@ -80,6 +82,22 @@ export interface View {
   variant?: string;             // deployment 배치안 이름 (Sprint 7: 필수 1~60자)
   clusterRef?: string;
   strategyMd?: string;          // deployment 배포 전략 Markdown (Sprint 7, 64KB)
+  strategy?: DeploymentStrategy;   // Sprint 11: 구조화 전략 (deployment·aws 배치안, V18)
+}
+
+/** 구조화 배포 전략 (Sprint 11 · DEP-04 · 03 "Sprint 11 모델 계약"). path·decisionId·validationId는 예약 — 보내면 400 */
+export interface DeploymentStrategy {
+  environments: { name: string; approvalRole?: string; promotion: 'same-image' | 'rebuild' }[];
+  release: {
+    type: 'rolling' | 'blue-green' | 'canary' | 'recreate';
+    rolling?: { maxSurge: string; maxUnavailable: string };
+    canary?: { steps: { weight: number; pauseMin: number }[] };
+    blueGreen?: { switchBy: 'service-selector' | 'lb' | 'dns' };
+  };
+  gates: { name: string; metric: string; threshold: string; observeMin: number; requirementIds: string[] }[];
+  rollback: { method: 'previous-image' | 'redeploy'; targetMin: number; trigger: string };
+  fallback?: { targetViewId?: string; trigger: string; switchMethod: 'lb-weight' | 'dns' | 'manual'; ownerRole: string; targetMin: number; dbCondition: string };
+  dbChange: { policy: 'expand-contract' | 'backward-compatible' | 'downtime' | 'none'; note?: string };
 }
 
 export interface ViewNode {
