@@ -15,7 +15,8 @@ const sampleReports = require('../../lib/aa/templates/sample-reports');
 const { createSampleProject, SampleSeedError } = require('../../lib/aa/sample-project');
 
 // 새 프로젝트 템플릿 (empty는 기본). 샘플 모델은 SQL 변경 없이 aa_create_project의 p_model로 넘긴다
-const TEMPLATES = { [sampleReports.key]: sampleReports };
+const sampleMigration = require('../../lib/aa/templates/sample-migration');
+const TEMPLATES = { [sampleReports.key]: sampleReports, [sampleMigration.key]: sampleMigration };
 
 const router = express.Router();
 router.use(requireAuth);

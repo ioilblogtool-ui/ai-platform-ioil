@@ -1,10 +1,12 @@
 {
-  "version": 3,
+  "version": 4,
   "categories": [
     { "key": "application", "label": "Application" },
     { "key": "data", "label": "Data" },
     { "key": "general", "label": "General" },
-    { "key": "deployment", "label": "Deployment" }
+    { "key": "deployment", "label": "Deployment" },
+    { "key": "aws", "label": "AWS" },
+    { "key": "kubernetes", "label": "Kubernetes" }
   ],
   "propertyTypes": ["string", "text", "number", "boolean", "enum", "list"],
   "types": {
@@ -158,6 +160,341 @@
         { "key": "startCommand", "label": "시작 명령", "type": "string", "placeholder": "npm start" },
         { "key": "port", "label": "포트", "type": "number", "integer": true, "min": 1, "max": 65535 },
         { "key": "instances", "label": "인스턴스 수", "type": "number", "integer": true, "min": 1, "default": 1 }
+      ]
+    },
+    "k8s.namespace": {
+      "label": "Namespace",
+      "category": "kubernetes",
+      "layer": "kubernetes",
+      "icon": "⬡",
+      "nodeKind": "component",
+      "views": [
+        "kubernetes"
+      ],
+      "container": true,
+      "properties": []
+    },
+    "k8s.deployment": {
+      "label": "Deployment",
+      "category": "kubernetes",
+      "layer": "kubernetes",
+      "icon": "⬡",
+      "nodeKind": "component",
+      "views": [
+        "kubernetes"
+      ],
+      "realizes": true,
+      "properties": [
+        {
+          "key": "replicas",
+          "label": "replicas",
+          "type": "number",
+          "integer": true,
+          "min": 0
+        },
+        {
+          "key": "image",
+          "label": "image",
+          "type": "string"
+        },
+        {
+          "key": "cpuRequest",
+          "label": "cpuRequest",
+          "type": "string"
+        },
+        {
+          "key": "memoryRequest",
+          "label": "memoryRequest",
+          "type": "string"
+        },
+        {
+          "key": "cpuLimit",
+          "label": "cpuLimit",
+          "type": "string"
+        },
+        {
+          "key": "memoryLimit",
+          "label": "memoryLimit",
+          "type": "string"
+        },
+        {
+          "key": "readinessPath",
+          "label": "readinessPath",
+          "type": "string"
+        },
+        {
+          "key": "livenessPath",
+          "label": "livenessPath",
+          "type": "string"
+        },
+        {
+          "key": "containerPort",
+          "label": "containerPort",
+          "type": "number",
+          "integer": true,
+          "min": 1,
+          "max": 65535
+        }
+      ]
+    },
+    "k8s.service": {
+      "label": "Service",
+      "category": "kubernetes",
+      "layer": "kubernetes",
+      "icon": "⬡",
+      "nodeKind": "component",
+      "views": [
+        "kubernetes"
+      ],
+      "properties": [
+        {
+          "key": "type",
+          "label": "type",
+          "type": "enum",
+          "options": [
+            "ClusterIP",
+            "NodePort",
+            "LoadBalancer"
+          ]
+        },
+        {
+          "key": "port",
+          "label": "port",
+          "type": "number",
+          "integer": true,
+          "min": 1,
+          "max": 65535
+        },
+        {
+          "key": "targetPort",
+          "label": "targetPort",
+          "type": "number",
+          "integer": true,
+          "min": 1,
+          "max": 65535
+        }
+      ]
+    },
+    "k8s.ingress": {
+      "label": "Ingress",
+      "category": "kubernetes",
+      "layer": "kubernetes",
+      "icon": "⬡",
+      "nodeKind": "component",
+      "views": [
+        "kubernetes"
+      ],
+      "properties": [
+        {
+          "key": "host",
+          "label": "host",
+          "type": "string"
+        },
+        {
+          "key": "path",
+          "label": "path",
+          "type": "string"
+        },
+        {
+          "key": "className",
+          "label": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "k8s.hpa": {
+      "label": "HPA",
+      "category": "kubernetes",
+      "layer": "kubernetes",
+      "icon": "⬡",
+      "nodeKind": "component",
+      "views": [
+        "kubernetes"
+      ],
+      "properties": [
+        {
+          "key": "min",
+          "label": "min",
+          "type": "number",
+          "integer": true,
+          "min": 1
+        },
+        {
+          "key": "max",
+          "label": "max",
+          "type": "number",
+          "integer": true,
+          "min": 1
+        },
+        {
+          "key": "targetCPU",
+          "label": "targetCPU",
+          "type": "number",
+          "integer": true,
+          "min": 1,
+          "max": 100
+        }
+      ]
+    },
+    "aws.region": {
+      "label": "Region",
+      "category": "aws",
+      "layer": "aws",
+      "icon": "◇",
+      "nodeKind": "component",
+      "views": [
+        "aws"
+      ],
+      "container": true,
+      "properties": [
+        {
+          "key": "region",
+          "label": "region",
+          "type": "string"
+        }
+      ]
+    },
+    "aws.vpc": {
+      "label": "VPC",
+      "category": "aws",
+      "layer": "aws",
+      "icon": "◇",
+      "nodeKind": "component",
+      "views": [
+        "aws"
+      ],
+      "container": true,
+      "properties": [
+        {
+          "key": "cidr",
+          "label": "cidr",
+          "type": "string"
+        }
+      ]
+    },
+    "aws.az": {
+      "label": "Availability Zone",
+      "category": "aws",
+      "layer": "aws",
+      "icon": "◇",
+      "nodeKind": "component",
+      "views": [
+        "aws"
+      ],
+      "container": true,
+      "properties": [
+        {
+          "key": "zone",
+          "label": "zone",
+          "type": "string"
+        }
+      ]
+    },
+    "aws.subnet": {
+      "label": "Subnet",
+      "category": "aws",
+      "layer": "aws",
+      "icon": "◇",
+      "nodeKind": "component",
+      "views": [
+        "aws"
+      ],
+      "container": true,
+      "properties": [
+        {
+          "key": "tier",
+          "label": "Subnet tier",
+          "type": "enum",
+          "default": "private-app",
+          "options": [
+            "public",
+            "private-app",
+            "private-data"
+          ]
+        },
+        {
+          "key": "cidr",
+          "label": "cidr",
+          "type": "string"
+        }
+      ]
+    },
+    "aws.alb": {
+      "label": "ALB",
+      "category": "aws",
+      "layer": "aws",
+      "icon": "◇",
+      "nodeKind": "component",
+      "views": [
+        "aws"
+      ],
+      "properties": [
+        {
+          "key": "scheme",
+          "label": "scheme",
+          "type": "enum",
+          "options": [
+            "internet-facing",
+            "internal"
+          ]
+        }
+      ]
+    },
+    "aws.eks": {
+      "label": "EKS",
+      "category": "aws",
+      "layer": "aws",
+      "icon": "◇",
+      "nodeKind": "component",
+      "views": [
+        "aws"
+      ],
+      "properties": [
+        {
+          "key": "version",
+          "label": "version",
+          "type": "string"
+        },
+        {
+          "key": "nodeGroups",
+          "label": "nodeGroups",
+          "type": "number",
+          "integer": true,
+          "min": 0
+        },
+        {
+          "key": "instanceType",
+          "label": "instanceType",
+          "type": "string"
+        }
+      ]
+    },
+    "aws.rds": {
+      "label": "RDS",
+      "category": "aws",
+      "layer": "aws",
+      "icon": "◇",
+      "nodeKind": "component",
+      "views": [
+        "aws"
+      ],
+      "realizes": true,
+      "properties": [
+        {
+          "key": "engine",
+          "label": "engine",
+          "type": "string"
+        },
+        {
+          "key": "instanceClass",
+          "label": "instanceClass",
+          "type": "string"
+        },
+        {
+          "key": "multiAz",
+          "label": "Multi-AZ",
+          "type": "boolean"
+        }
       ]
     }
   }

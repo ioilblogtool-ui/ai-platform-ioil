@@ -50,6 +50,20 @@ function canonEdge(e) {
   return out;
 }
 
+/** K8s 연결은 같은 모델에 정본 AWS 노드를 가진 EKS만 의미가 있다. */
+function clusterRefFor(model, view) {
+  const id = view.clusterRef;
+  if (view.kind !== 'kubernetes' || typeof id !== 'string' || model.components?.[id]?.type !== 'aws.eks') return null;
+  let occurrences = 0;
+  for (const candidate of model.views ?? []) {
+    for (const node of candidate.nodes ?? []) {
+      if (node.componentId !== id) continue;
+      if (candidate.kind !== 'aws' || node.kind !== 'component' || ++occurrences > 1) return null;
+    }
+  }
+  return occurrences === 1 ? id : null;
+}
+
 /** 해시·Diff 입력. 좌표·크기·viewport 없음 */
 function canonModel(model) {
   const m = model ?? {};
@@ -58,6 +72,8 @@ function canonModel(model) {
     if (v.variant !== undefined && v.variant !== null) out.variant = v.variant;
     // Sprint 7: 배포 전략도 의미 변경. 빈 문자열은 없는 것과 같다 → 전략 없는 모델의 해시는 Sprint 6과 같다
     if (typeof v.strategyMd === 'string' && v.strategyMd !== '') out.strategyMd = v.strategyMd;
+    const clusterRef = clusterRefFor(m, v);
+    if (clusterRef !== null) out.clusterRef = clusterRef;
     out.nodes = (v.nodes ?? []).map(canonNode).sort(byId);
     out.edges = (v.edges ?? []).map(canonEdge).sort(byId);
     return out;
@@ -95,4 +111,4 @@ function layoutChanges(prev, next) {
   return count;
 }
 
-module.exports = { HASH_VERSION, canonicalJson, canonModel, modelHash, layoutChanges, sha256 };
+module.exports = { HASH_VERSION, canonicalJson, canonModel, clusterRefFor, modelHash, layoutChanges, sha256 };

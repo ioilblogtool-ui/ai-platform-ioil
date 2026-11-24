@@ -1,7 +1,7 @@
 // 발행 시 저장하는 Diff 요약 (Sprint 6 Step 1 · Q5 · 03 §4).
 // 버전은 불변이라 발행 때 요약을 확정한다. 상세 changes·Compare 화면은 Sprint 7.
 // 입력은 model-canon과 같은 정규화를 거친다 → 해시가 다르면 요약의 어느 수든 0보다 크다.
-const { HASH_VERSION, canonModel, canonicalJson, layoutChanges } = require('./model-canon');
+const { HASH_VERSION, canonModel, canonicalJson, clusterRefFor, layoutChanges } = require('./model-canon');
 const { compareSnapshots } = require('./requirements-snapshot');
 
 const withoutReqs = ({ requirementIds, ...rest }) => rest;   // eslint-disable-line no-unused-vars
@@ -31,6 +31,7 @@ function diffViews(prevViews, nextViews) {
     const o = before.get(v.id);
     if (!o) { viewChanges++; continue; }
     if (o.kind !== v.kind || o.name !== v.name || (o.variant ?? null) !== (v.variant ?? null)) viewChanges++;
+    if (o.clusterRef !== v.clusterRef) viewChanges++;
     const oldNodes = new Map(o.nodes.map((n) => [n.id, n]));
     const newIds = new Set();
     for (const n of v.nodes) {
@@ -184,6 +185,15 @@ function diffModels(prev, next, opts = {}) {
     }
     if ((o.strategyMd ?? '') !== (v.strategyMd ?? '')) {
       changes.push({ kind: 'view.strategy', viewId: id, variant: v.variant ?? v.name, change: !o.strategyMd ? 'added' : !v.strategyMd ? 'removed' : 'modified' });
+    }
+    const oldCluster = clusterRefFor(A, o);
+    const newCluster = clusterRefFor(B, v);
+    if (oldCluster !== newCluster) {
+      changes.push({
+        kind: 'view.cluster', viewId: id,
+        before: oldCluster === null ? null : ca[oldCluster].name ?? oldCluster,
+        after: newCluster === null ? null : cb[newCluster].name ?? newCluster,
+      });
     }
     const on = new Map(o.nodes.map((n) => [n.id, n]));
     const parentName = (model, view, pid) => (pid ? nodeName(model, view, view.nodes.find((x) => x.id === pid)) : null);

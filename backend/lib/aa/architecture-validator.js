@@ -3,6 +3,7 @@
 // Sprint 7: realizes 규칙(V2), 컨테이너 컴포넌트 부모(V5), Deployment View 한도(V13).
 // V6: 타입 레지스트리(type-registry.json — /api/aa/meta/types와 같은 원본) 기준 컴포넌트 타입·속성 검증.
 //     모든 속성은 선택 항목이다. 있는 키만 검사하고, 기본값을 채우거나 값을 바꾸지 않는다 (Sprint 1 저장본 호환).
+const { isIP } = require('node:net');
 const { isUuid } = require('./requirement-refs');
 const { scanForSecrets } = require('./sensitive-scan');
 const REGISTRY = require('./type-registry.json');
@@ -226,6 +227,22 @@ function validateModel(model) {
       err('STRUCTURE', `${p}.custom`, `custom은 ${STRING_MAX}자 이하 문자열 값의 객체여야 합니다.`);
     }
 
+    if (c.type === 'k8s.hpa' && isFiniteNum(c.properties?.min) && isFiniteNum(c.properties?.max)
+        && c.properties.min > c.properties.max) {
+      err('V6', `${p}.properties.max`, 'HPA max는 min 이상이어야 합니다.');
+    }
+    if (c.type === 'aws.subnet' && c.properties?.tier === undefined) {
+      err('V6', `${p}.properties.tier`, 'Subnet tier가 필요합니다.');
+    }
+
+    if ((c.type === 'aws.vpc' || c.type === 'aws.subnet') && typeof c.properties?.cidr === 'string') {
+      const match = /^([^/]+)\/(\d{1,3})$/.exec(c.properties.cidr);
+      const version = match ? isIP(match[1]) : 0;
+      if (!version || Number(match[2]) > (version === 4 ? 32 : 128)) {
+        err('V6', p + '.properties.cidr', '유효한 IPv4 또는 IPv6 CIDR이 필요합니다.');
+      }
+    }
+
     // V6: 타입·layer·속성
     if (typeof c.type === 'string' && c.type) {
       const def = Object.prototype.hasOwnProperty.call(REGISTRY.types, c.type) ? REGISTRY.types[c.type] : null;
@@ -271,7 +288,7 @@ function validateModel(model) {
     checkRelationAttrs(r, p, err);
     // Sprint 7: realizes = 구현체(레지스트리 realizes: true) → Logical 컴포넌트. 속성 없음, 같은 쌍 하나
     if (r.type === 'realizes' && isObj(components[r.from]) && isObj(components[r.to])) {
-      if (!typeDef(components[r.from].type)?.realizes) err('V2', `${p}.from`, 'realizes의 시작은 Process·Managed DB·Managed Auth여야 합니다.');
+      if (!typeDef(components[r.from].type)?.realizes) err('V2', `${p}.from`, 'realizes의 시작은 레지스트리가 허용하는 구현 컴포넌트여야 합니다.');
       if (components[r.to].layer !== 'logical') err('V2', `${p}.to`, 'realizes의 대상은 Logical 컴포넌트여야 합니다.');
       for (const k of ['protocol', 'mode', 'label']) if (r[k] !== undefined && r[k] !== null) err('V2', `${p}.${k}`, `realizes에는 ${k}를 두지 않습니다.`);
       const pair = `${r.from}>${r.to}`;
@@ -286,6 +303,13 @@ function validateModel(model) {
   const deploymentViews = model.views.filter((v) => isObj(v) && v.kind === 'deployment');
   if (deploymentViews.length > MAX_DEPLOYMENT_VIEWS) err('V13', 'views', `배치안은 최대 ${MAX_DEPLOYMENT_VIEWS}개입니다.`);
   const variants = new Set();
+  const eksNodes = new Map();
+  const linkedClusters = new Set();
+  for (const [kind, limit] of [['aws', 3], ['kubernetes', 5]]) {
+    if (model.views.filter((view) => view?.kind === kind).length > limit) {
+      err('V13', 'views', `${kind} View는 최대 ${limit}개입니다.`);
+    }
+  }
   model.views.forEach((v, vi) => {
     const vp = `views[${vi}]`;
     if (!isObj(v)) { err('STRUCTURE', vp, 'view는 객체여야 합니다.'); return; }
@@ -294,15 +318,24 @@ function validateModel(model) {
     if (!VIEW_KINDS.has(v.kind)) err('STRUCTURE', `${vp}.kind`, `지원하지 않는 view 종류입니다: ${v.kind}`);
     if (!Array.isArray(v.nodes) || !Array.isArray(v.edges)) { err('STRUCTURE', vp, 'nodes와 edges는 배열이어야 합니다.'); return; }
     const isDeployment = v.kind === 'deployment';
-    if (isDeployment) {
+    if (isDeployment || v.kind === 'aws' || v.kind === 'kubernetes') {
       const name = typeof v.variant === 'string' ? v.variant.trim() : '';
       if (!name || name.length > VARIANT_MAX) err('V13', `${vp}.variant`, `배치안 이름은 1~${VARIANT_MAX}자여야 합니다.`);
-      else if (variants.has(name)) err('V13', `${vp}.variant`, `배치안 이름이 겹칩니다: ${name}`);
-      else variants.add(name);
+      else if (variants.has(v.kind + ':' + name)) err('V13', `${vp}.variant`, `배치안 이름이 겹칩니다: ${name}`);
+      else variants.add(v.kind + ':' + name);
     }
     if (v.strategyMd !== undefined && v.strategyMd !== null) {
       if (!isDeployment) err('V13', `${vp}.strategyMd`, '배포 전략은 배치안(deployment View)에만 둘 수 있습니다.');
       else if (typeof v.strategyMd !== 'string' || Buffer.byteLength(v.strategyMd, 'utf8') > STRATEGY_MAX_BYTES) err('V13', `${vp}.strategyMd`, '배포 전략은 64KB 이하 문자열이어야 합니다.');
+    }
+
+    if (v.clusterRef !== undefined) {
+      if (v.kind !== 'kubernetes' || typeof v.clusterRef !== 'string'
+          || components[v.clusterRef]?.type !== 'aws.eks' || linkedClusters.has(v.clusterRef)) {
+        err('V15', `${vp}.clusterRef`, 'K8s View에는 같은 모델의 미연결 EKS만 지정할 수 있습니다.');
+      } else {
+        linkedClusters.add(v.clusterRef);
+      }
     }
 
     const nodesById = new Map();
@@ -323,9 +356,16 @@ function validateModel(model) {
       } else if (n.kind === 'component') {
         err('V3', `${np}.componentId`, 'component 노드에는 componentId가 필요합니다.');
       }
+      if (components[n.componentId]?.type === 'aws.eks') {
+        if (v.kind !== 'aws' || n.kind !== 'component' || eksNodes.has(n.componentId)) {
+          err('V15', np, 'EKS는 AWS View 하나에 정본 노드 하나만 둘 수 있습니다.');
+        } else {
+          eksNodes.set(n.componentId, n.id);
+        }
+      }
       // Sprint 7: 컨테이너 컴포넌트 노드는 group처럼 크기가 필요하다
       if (n.kind === 'component' && typeDef(components[n.componentId]?.type)?.container) {
-        if (!isDeployment) err('V5', `${np}`, '컨테이너 컴포넌트는 배치안(deployment View)에만 둘 수 있습니다.');
+        if (![ 'deployment', 'aws', 'kubernetes' ].includes(v.kind)) err('V5', np, '이 View에서는 컨테이너 컴포넌트를 사용할 수 없습니다.');
         if (!isFiniteNum(n.width) || !isFiniteNum(n.height) || n.width < GROUP_MIN_SIZE || n.height < GROUP_MIN_SIZE) {
           err('V3', `${np}`, `컨테이너에는 ${GROUP_MIN_SIZE} 이상의 width·height가 필요합니다.`);
         }
@@ -345,7 +385,7 @@ function validateModel(model) {
 
     // V5: parentId = 같은 View의 group 노드 (배치안에서는 컨테이너 컴포넌트 노드도), 순환 없음
     const canContain = (node) => node.kind === 'group'
-      || (isDeployment && node.kind === 'component' && Boolean(typeDef(components[node.componentId]?.type)?.container));
+      || (['deployment', 'aws', 'kubernetes'].includes(v.kind) && node.kind === 'component' && Boolean(typeDef(components[node.componentId]?.type)?.container));
     for (const n of nodesById.values()) {
       if (n.parentId === undefined || n.parentId === null) continue;
       const parent = nodesById.get(n.parentId);
@@ -380,6 +420,34 @@ function validateModel(model) {
     }
 
     // V4: 엣지 → 관계, 양 끝 컴포넌트의 노드가 이 View에 있어야 함
+    if (v.kind === 'aws') {
+      const nearest = (node, type) => {
+        const visited = new Set([node.id]);
+        let parent = nodesById.get(node.parentId);
+        while (parent && !visited.has(parent.id)) {
+          if (components[parent.componentId]?.type === type) return parent;
+          visited.add(parent.id);
+          parent = nodesById.get(parent.parentId);
+        }
+        return null;
+      };
+      const warn = (node, message) => warnings.push({ rule: 'V16', path: `${vp}.nodes(${node.id})`, viewId: v.id, nodeId: node.id, message });
+      const zones = new Map();
+      for (const node of nodesById.values()) {
+        if (components[node.componentId]?.type !== 'aws.az') continue;
+        const vpc = nearest(node, 'aws.vpc');
+        if (vpc) zones.set(vpc.id, (zones.get(vpc.id) ?? 0) + 1);
+      }
+      for (const node of nodesById.values()) {
+        const component = components[node.componentId];
+        if (component?.type === 'aws.vpc' && zones.get(node.id) === 1) warn(node, 'VPC에 가용 영역이 하나만 배치되었습니다.');
+        if (component?.type !== 'aws.rds') continue;
+        const subnet = nearest(node, 'aws.subnet');
+        if (subnet && components[subnet.componentId]?.properties?.tier === 'public') warn(node, 'RDS가 Public subnet에 배치되었습니다.');
+        if (component.properties?.multiAz === false) warn(node, 'RDS의 Multi-AZ가 꺼져 있습니다.');
+      }
+    }
+
     v.edges.forEach((e, ei) => {
       const ep = `${vp}.edges[${ei}]`;
       if (!isObj(e)) { err('STRUCTURE', ep, '엣지는 객체여야 합니다.'); return; }
@@ -393,6 +461,12 @@ function validateModel(model) {
       }
     });
   });
+
+  for (const [id, component] of Object.entries(components)) {
+    if (component?.type === 'aws.eks' && !eksNodes.has(id)) {
+      err('V15', `components.${id}`, 'EKS에는 AWS View의 정본 노드가 필요합니다.');
+    }
+  }
 
   // V10·V14 (Sprint 8, D-25): API Flow
   if (isObj(model.flows)) checkFlows(model.flows, components, err);

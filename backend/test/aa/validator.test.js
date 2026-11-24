@@ -94,9 +94,9 @@ describe('V6: 타입 레지스트리 검증', () => {
   const { REGISTRY } = require('../../lib/aa/architecture-validator');
   const v6 = (m) => validateModel(m).errors.filter((e) => e.rule === 'V6');
 
-  it('레지스트리는 Logical 11 + Deployment 8 = 19개 타입이고 group·note만 컴포넌트가 아니다 (Sprint 7 v3)', () => {
-    assert.equal(Object.keys(REGISTRY.types).length, 19);
-    assert.equal(REGISTRY.version, 3);
+  it('레지스트리는 Logical 11 + Deployment 8 + K8s 5 + AWS 7 = 31개 타입이고 group·note만 컴포넌트가 아니다 (Sprint 10 v4)', () => {
+    assert.equal(Object.keys(REGISTRY.types).length, 31);
+    assert.equal(REGISTRY.version, 4);
     const dep = Object.entries(REGISTRY.types).filter(([k]) => k.startsWith('dep.'));
     assert.deepEqual(dep.filter(([, d]) => d.container).map(([k]) => k).sort(), ['dep.environment', 'dep.platform', 'dep.vm', 'dep.zone']);
     assert.deepEqual(dep.filter(([, d]) => d.realizes).map(([k]) => k).sort(), ['dep.managed_auth', 'dep.managed_db', 'dep.process']);

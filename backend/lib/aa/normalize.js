@@ -61,7 +61,7 @@ function normalizeModel(model, context = {}) {
   // 순서: Logical에 그려진 순서 → 그려지지 않은 컴포넌트(이름순)
   // Sprint 7 Q6: Logical 기준 출력 — 배치안(deployment 레이어) 컴포넌트는 뺀다. 그 끝점의 관계(realizes 포함)도 자연히 빠진다.
   // 기존 Logical의 calls·depends_on·그룹·요구사항 집계는 그대로라 배치안이 없던 모델의 출력은 바뀌지 않는다.
-  const components = Object.fromEntries(Object.entries(model?.components ?? {}).filter(([, c]) => c?.layer !== 'deployment'));
+  const components = Object.fromEntries(Object.entries(model?.components ?? {}).filter(([, c]) => !['deployment', 'kubernetes', 'aws'].includes(c?.layer)));
   const drawn = viewNodes.filter((n) => n.kind === 'component' && components[n.componentId]);
   const drawnIds = new Set(drawn.map((n) => n.componentId));
   const order = [
