@@ -64,6 +64,19 @@ function clusterRefFor(model, view) {
   return occurrences === 1 ? id : null;
 }
 
+/**
+ * Sprint 11 (03 "Sprint 11 모델 계약"): 구조화 전략. 키 순서는 canonicalJson이 정렬하고,
+ * environments·gates·canary steps의 배열 순서는 의미가 있어 유지한다. gates[].requirementIds만 집합으로 정렬한다.
+ */
+function canonStrategy(st) {
+  if (!st || typeof st !== 'object' || Array.isArray(st)) return st;
+  const out = { ...st };
+  if (Array.isArray(st.gates)) {
+    out.gates = st.gates.map((g) => (g && Array.isArray(g.requirementIds) ? { ...g, requirementIds: [...new Set(g.requirementIds)].sort() } : g));
+  }
+  return out;
+}
+
 /** 해시·Diff 입력. 좌표·크기·viewport 없음 */
 function canonModel(model) {
   const m = model ?? {};
@@ -72,6 +85,8 @@ function canonModel(model) {
     if (v.variant !== undefined && v.variant !== null) out.variant = v.variant;
     // Sprint 7: 배포 전략도 의미 변경. 빈 문자열은 없는 것과 같다 → 전략 없는 모델의 해시는 Sprint 6과 같다
     if (typeof v.strategyMd === 'string' && v.strategyMd !== '') out.strategyMd = v.strategyMd;
+    // Sprint 11: 구조화 전략은 있을 때만 넣는다 → 전략 없는 모델의 해시는 Sprint 10과 바이트 단위로 같다
+    if (v.strategy !== undefined && v.strategy !== null) out.strategy = canonStrategy(v.strategy);
     const clusterRef = clusterRefFor(m, v);
     if (clusterRef !== null) out.clusterRef = clusterRef;
     out.nodes = (v.nodes ?? []).map(canonNode).sort(byId);
@@ -111,4 +126,4 @@ function layoutChanges(prev, next) {
   return count;
 }
 
-module.exports = { HASH_VERSION, canonicalJson, canonModel, clusterRefFor, modelHash, layoutChanges, sha256 };
+module.exports = { HASH_VERSION, canonicalJson, canonModel, canonStrategy, clusterRefFor, modelHash, layoutChanges, sha256 };

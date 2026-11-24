@@ -2,16 +2,10 @@
 // 모델(컴포넌트·관계·흐름 — 흐름은 Sprint 8)이 참조하는 요구사항만, 지금 프로젝트에 있는 것만 담는다.
 // 형식: { "<uuid>": { code, kind, category, title, target, metric, priority } }
 const { canonicalJson, sha256 } = require('./model-canon');
+// Sprint 11: 참조 수집은 V9 정리·삭제 보호와 같은 함수(requirement-refs.lists — 전략 게이트 포함)
+const { referencedRequirementIds } = require('./requirement-refs');
 
 const FIELDS = ['code', 'kind', 'category', 'title', 'target', 'metric', 'priority'];
-
-function referencedRequirementIds(model) {
-  const ids = new Set();
-  for (const c of Object.values(model?.components ?? {})) for (const id of c.requirementIds ?? []) ids.add(id);
-  for (const r of Object.values(model?.relations ?? {})) for (const id of r.requirementIds ?? []) ids.add(id);
-  for (const f of Object.values(model?.flows ?? {})) for (const id of f?.requirementIds ?? []) ids.add(id);
-  return ids;
-}
 
 /** @param {Array<object>} requirements 프로젝트 요구사항 (DB 행 또는 API 형태 — 필드 이름이 같다) */
 function buildSnapshot(model, requirements) {

@@ -1,5 +1,5 @@
 // 아키텍처 모델 저장 전 검증 (03 데이터 모델 §2.2)
-// V1~V6, V7(경고), V8, V11(경고), V12, V13. Sprint 8: calls 운영·보안 속성(V2), API Flow(V10·V14).
+// V1~V6, V7(경고), V8, V11(경고), V12, V13. Sprint 10: V15, V16(경고). Sprint 11: V17(운영 설계 관계), V18(구조화 전략), V19(경고). Sprint 8: calls 운영·보안 속성(V2), API Flow(V10·V14).
 // Sprint 7: realizes 규칙(V2), 컨테이너 컴포넌트 부모(V5), Deployment View 한도(V13).
 // V6: 타입 레지스트리(type-registry.json — /api/aa/meta/types와 같은 원본) 기준 컴포넌트 타입·속성 검증.
 //     모든 속성은 선택 항목이다. 있는 키만 검사하고, 기본값을 채우거나 값을 바꾸지 않는다 (Sprint 1 저장본 호환).
@@ -19,7 +19,9 @@ const ID_RE = {
   node:      /^nd_[A-Za-z0-9_-]{1,64}$/,
   edge:      /^ed_[A-Za-z0-9_-]{1,64}$/,
 };
-const RELATION_TYPES = new Set(['calls', 'realizes', 'depends_on']);
+// Sprint 11 (OPS-02, V17): 운영 설계 관계 — 양 끝 중 하나 이상이 ops layer, 표시 엣지는 deployment View에만
+const OPS_RELATION_TYPES = new Set(['scrapes', 'ships_logs', 'exports_traces', 'alerts_to', 'builds', 'pushes', 'syncs']);
+const RELATION_TYPES = new Set(['calls', 'realizes', 'depends_on', ...OPS_RELATION_TYPES]);
 const NODE_KINDS = new Set(['component', 'group', 'note']);
 const VIEW_KINDS = new Set(['logical', 'deployment', 'kubernetes', 'aws', 'apiflow']);
 
@@ -134,6 +136,120 @@ function checkFlows(flows, components, err) {
     if (typeof f.mermaid !== 'string') err('V14', `${p}.mermaid`, 'mermaid는 문자열이어야 합니다.');
     else if (Buffer.byteLength(f.mermaid, 'utf8') > FLOW_LIMITS.mermaidBytes) err('V14', `${p}.mermaid`, 'Mermaid 본문은 UTF-8 32KB 이하여야 합니다.');
   }
+}
+
+// Sprint 11 (DEP-04, V18·V19): 구조화 배포 전략 — 03 "Sprint 11 모델 계약"
+const STRATEGY_LIMITS = { environments: 5, gates: 10, steps: 10, text: STRING_MAX, minutes: 1440 };
+const STRATEGY_KEYS = new Set(['environments', 'release', 'gates', 'rollback', 'fallback', 'dbChange']);
+const STRATEGY_RESERVED = 'path는 후속(DEP-05) 필드이고, ADR·Validation 연결은 Phase 3에서 엽니다.';
+const RELEASE_TYPES = new Set(['rolling', 'blue-green', 'canary', 'recreate']);
+const PROMOTIONS = new Set(['same-image', 'rebuild']);
+const SWITCH_BY = new Set(['service-selector', 'lb', 'dns']);
+const ROLLBACK_METHODS = new Set(['previous-image', 'redeploy']);
+const SWITCH_METHODS = new Set(['lb-weight', 'dns', 'manual']);
+const DB_POLICIES = new Set(['expand-contract', 'backward-compatible', 'downtime', 'none']);
+
+function checkStrategy(st, sp, viewsById, err) {
+  const text = (v, path, { required = false } = {}) => {
+    if (v === undefined || v === null) { if (required) err('V18', path, '값이 필요합니다.'); return; }
+    if (typeof v !== 'string' || v.length > STRATEGY_LIMITS.text || (required && !v.trim())) err('V18', path, `1~${STRATEGY_LIMITS.text}자 문자열이어야 합니다.`);
+  };
+  const minutes = (v, path, min = 1) => {
+    if (!(Number.isInteger(v) && v >= min && v <= STRATEGY_LIMITS.minutes)) err('V18', path, `${min}~${STRATEGY_LIMITS.minutes} 사이 정수(분)여야 합니다.`);
+  };
+  const oneOf = (set, v, path) => { if (!set.has(v)) err('V18', path, `다음 중 하나여야 합니다: ${[...set].join(', ')}`); };
+  if (!isObj(st)) { err('V18', sp, 'strategy는 객체여야 합니다.'); return; }
+  if (st.path !== undefined) err('V18', `${sp}.path`, STRATEGY_RESERVED);
+  for (const k of Object.keys(st)) if (k !== 'path' && !STRATEGY_KEYS.has(k)) err('V18', `${sp}.${k}`, `알 수 없는 전략 항목입니다: ${k}`);
+
+  if (!Array.isArray(st.environments) || st.environments.length > STRATEGY_LIMITS.environments) {
+    err('V18', `${sp}.environments`, `환경은 ${STRATEGY_LIMITS.environments}개 이하 배열이어야 합니다.`);
+  } else st.environments.forEach((e, i) => {
+    const ep = `${sp}.environments[${i}]`;
+    if (!isObj(e)) { err('V18', ep, '환경은 객체여야 합니다.'); return; }
+    text(e.name, `${ep}.name`, { required: true });
+    text(e.approvalRole, `${ep}.approvalRole`);
+    oneOf(PROMOTIONS, e.promotion, `${ep}.promotion`);
+  });
+
+  const rel = st.release;
+  if (!isObj(rel)) err('V18', `${sp}.release`, 'release는 객체여야 합니다.');
+  else {
+    oneOf(RELEASE_TYPES, rel.type, `${sp}.release.type`);
+    if (rel.decisionId !== undefined) err('V18', `${sp}.release.decisionId`, STRATEGY_RESERVED);
+    if (rel.rolling !== undefined) {
+      if (!isObj(rel.rolling)) err('V18', `${sp}.release.rolling`, 'rolling은 객체여야 합니다.');
+      else { text(rel.rolling.maxSurge, `${sp}.release.rolling.maxSurge`, { required: true }); text(rel.rolling.maxUnavailable, `${sp}.release.rolling.maxUnavailable`, { required: true }); }
+    }
+    if (rel.canary !== undefined) {
+      const steps = isObj(rel.canary) ? rel.canary.steps : null;
+      if (!Array.isArray(steps) || !steps.length || steps.length > STRATEGY_LIMITS.steps) err('V18', `${sp}.release.canary.steps`, `canary 단계는 1~${STRATEGY_LIMITS.steps}개여야 합니다.`);
+      else {
+        let prev = 0;
+        steps.forEach((step, i) => {
+          const pp = `${sp}.release.canary.steps[${i}]`;
+          if (!isObj(step) || !Number.isInteger(step.weight) || step.weight < 1 || step.weight > 100 || step.weight <= prev) {
+            err('V18', `${pp}.weight`, 'canary 비율은 1~100 정수이고 단계마다 커져야 합니다.');
+          } else prev = step.weight;
+          if (isObj(step)) minutes(step.pauseMin, `${pp}.pauseMin`, 0);
+        });
+      }
+    }
+    if (rel.blueGreen !== undefined) {
+      if (!isObj(rel.blueGreen)) err('V18', `${sp}.release.blueGreen`, 'blueGreen은 객체여야 합니다.');
+      else oneOf(SWITCH_BY, rel.blueGreen.switchBy, `${sp}.release.blueGreen.switchBy`);
+    }
+  }
+
+  if (!Array.isArray(st.gates) || st.gates.length > STRATEGY_LIMITS.gates) {
+    err('V18', `${sp}.gates`, `진행·중단 기준은 ${STRATEGY_LIMITS.gates}개 이하 배열이어야 합니다.`);
+  } else st.gates.forEach((g, i) => {
+    const gp = `${sp}.gates[${i}]`;
+    if (!isObj(g)) { err('V18', gp, '기준은 객체여야 합니다.'); return; }
+    text(g.name, `${gp}.name`, { required: true });
+    text(g.metric, `${gp}.metric`, { required: true });
+    text(g.threshold, `${gp}.threshold`, { required: true });
+    minutes(g.observeMin, `${gp}.observeMin`);
+    if (g.validationId !== undefined) err('V18', `${gp}.validationId`, STRATEGY_RESERVED);
+    if (!Array.isArray(g.requirementIds)) err('V9', `${gp}.requirementIds`, 'requirementIds는 배열이어야 합니다.');
+    else checkRequirementIds(g, gp, err);
+  });
+
+  const rb = st.rollback;
+  if (!isObj(rb)) err('V18', `${sp}.rollback`, 'rollback은 객체여야 합니다.');
+  else { oneOf(ROLLBACK_METHODS, rb.method, `${sp}.rollback.method`); minutes(rb.targetMin, `${sp}.rollback.targetMin`); text(rb.trigger, `${sp}.rollback.trigger`, { required: true }); }
+
+  const fb = st.fallback;
+  if (fb !== undefined) {
+    if (!isObj(fb)) err('V18', `${sp}.fallback`, 'fallback은 객체여야 합니다.');
+    else {
+      if (fb.targetViewId !== undefined && viewsById.get(fb.targetViewId)?.kind !== 'deployment') {
+        err('V18', `${sp}.fallback.targetViewId`, 'VM 복귀 대상은 같은 모델의 Deployment 배치안이어야 합니다.');
+      }
+      text(fb.trigger, `${sp}.fallback.trigger`, { required: true });
+      oneOf(SWITCH_METHODS, fb.switchMethod, `${sp}.fallback.switchMethod`);
+      text(fb.ownerRole, `${sp}.fallback.ownerRole`, { required: true });
+      minutes(fb.targetMin, `${sp}.fallback.targetMin`);
+      text(fb.dbCondition, `${sp}.fallback.dbCondition`, { required: true });
+    }
+  }
+
+  const dbc = st.dbChange;
+  if (!isObj(dbc)) err('V18', `${sp}.dbChange`, 'dbChange는 객체여야 합니다.');
+  else { oneOf(DB_POLICIES, dbc.policy, `${sp}.dbChange.policy`); text(dbc.note, `${sp}.dbChange.note`); }
+}
+
+/** V19 (경고): VM 복귀 대상이 비었거나, 대상 배치안에 realizes 실행 요소가 없다 */
+function fallbackWarnings(v, vp, viewsById, relations, warnings) {
+  const fb = v.strategy?.fallback;
+  if (!isObj(fb)) return;
+  const base = { rule: 'V19', code: 'V19', path: `${vp}.strategy.fallback`, viewId: v.id };
+  if (fb.targetViewId === undefined) { warnings.push({ ...base, message: 'VM 복귀 대상이 미지정입니다.' }); return; }
+  const target = viewsById.get(fb.targetViewId);
+  if (target?.kind !== 'deployment') return;   // V18 오류로 처리
+  const implementers = new Set(Object.values(relations).filter((r) => isObj(r) && r.type === 'realizes').map((r) => r.from));
+  const hasExecutor = (target.nodes ?? []).some((n) => isObj(n) && implementers.has(n.componentId));
+  if (!hasExecutor) warnings.push({ ...base, targetViewId: target.id, message: `복귀 대상 '${target.variant ?? target.name}'에 실행 요소가 없습니다.` });
 }
 
 const typeDef = (type) => (typeof type === 'string' && Object.prototype.hasOwnProperty.call(REGISTRY.types, type) ? REGISTRY.types[type] : null);
@@ -286,6 +402,11 @@ function validateModel(model) {
     if (!Object.prototype.hasOwnProperty.call(components, r.to)) err('V2', `${p}.to`, `존재하지 않는 컴포넌트입니다: ${r.to}`);
     // Sprint 8 (REL-05·06, D-26): calls 운영·보안 속성 — 모두 선택, calls에만
     checkRelationAttrs(r, p, err);
+    // Sprint 11 (V17): 운영 설계 관계는 양 끝 중 하나 이상이 ops layer. protocol·mode 없음
+    if (OPS_RELATION_TYPES.has(r.type) && isObj(components[r.from]) && isObj(components[r.to])) {
+      if (components[r.from].layer !== 'ops' && components[r.to].layer !== 'ops') err('V17', p, `${r.type} 관계는 한쪽 끝이 운영 설계(ops) 컴포넌트여야 합니다.`);
+      for (const k of ['protocol', 'mode']) if (r[k] !== undefined && r[k] !== null) err('V17', `${p}.${k}`, `${r.type} 관계에는 ${k}를 두지 않습니다.`);
+    }
     // Sprint 7: realizes = 구현체(레지스트리 realizes: true) → Logical 컴포넌트. 속성 없음, 같은 쌍 하나
     if (r.type === 'realizes' && isObj(components[r.from]) && isObj(components[r.to])) {
       if (!typeDef(components[r.from].type)?.realizes) err('V2', `${p}.from`, 'realizes의 시작은 레지스트리가 허용하는 구현 컴포넌트여야 합니다.');
@@ -305,6 +426,8 @@ function validateModel(model) {
   const variants = new Set();
   const eksNodes = new Map();
   const linkedClusters = new Set();
+  const viewsById = new Map(model.views.filter(isObj).map((v) => [v.id, v]));
+  const opsEdgeCount = new Map();   // Sprint 11 (V17): 운영 설계 관계별 표시 엣지 수
   for (const [kind, limit] of [['aws', 3], ['kubernetes', 5]]) {
     if (model.views.filter((view) => view?.kind === kind).length > limit) {
       err('V13', 'views', `${kind} View는 최대 ${limit}개입니다.`);
@@ -327,6 +450,12 @@ function validateModel(model) {
     if (v.strategyMd !== undefined && v.strategyMd !== null) {
       if (!isDeployment) err('V13', `${vp}.strategyMd`, '배포 전략은 배치안(deployment View)에만 둘 수 있습니다.');
       else if (typeof v.strategyMd !== 'string' || Buffer.byteLength(v.strategyMd, 'utf8') > STRATEGY_MAX_BYTES) err('V13', `${vp}.strategyMd`, '배포 전략은 64KB 이하 문자열이어야 합니다.');
+    }
+
+    // Sprint 11 (V18·V19): 구조화 전략은 deployment·aws 배치안에만
+    if (v.strategy !== undefined) {
+      if (!isDeployment && v.kind !== 'aws') err('V18', `${vp}.strategy`, '구조화 배포 전략은 Deployment·AWS 배치안에만 둘 수 있습니다.');
+      else { checkStrategy(v.strategy, `${vp}.strategy`, viewsById, err); fallbackWarnings(v, vp, viewsById, relations, warnings); }
     }
 
     if (v.clusterRef !== undefined) {
@@ -456,11 +585,25 @@ function validateModel(model) {
       const rel = Object.prototype.hasOwnProperty.call(relations, e.relationId) ? relations[e.relationId] : null;
       if (!rel) { err('V4', `${ep}.relationId`, `존재하지 않는 관계입니다: ${e.relationId}`); return; }
       if (rel.type === 'realizes') { err('V4', `${ep}.relationId`, 'realizes 관계는 캔버스 엣지로 그리지 않습니다.'); return; }
+      if (OPS_RELATION_TYPES.has(rel.type)) {
+        if (!isDeployment) err('V17', `${ep}.relationId`, '운영 설계 관계는 Deployment 배치안에만 그릴 수 있습니다.');
+        // 표시 엣지로 인정: deployment View이고 그 View에 양 끝 컴포넌트의 노드가 있을 때만 (끝점 불일치는 아래 V4)
+        else if (componentNodeInView.has(rel.from) && componentNodeInView.has(rel.to)) {
+          opsEdgeCount.set(e.relationId, (opsEdgeCount.get(e.relationId) ?? 0) + 1);
+        }
+      }
       if (!componentNodeInView.has(rel.from) || !componentNodeInView.has(rel.to)) {
         err('V4', `${ep}.relationId`, '관계 양 끝 컴포넌트의 노드가 이 View에 있어야 합니다.');
       }
     });
   });
+
+  // Sprint 11 (V17): 운영 설계 관계는 표시 엣지가 하나 이상 (두 끝이 서로 다른 View에만 있으면 여기서 거부)
+  for (const [id, r] of Object.entries(relations)) {
+    if (isObj(r) && OPS_RELATION_TYPES.has(r.type) && !opsEdgeCount.get(id)) {
+      err('V17', `relations.${id}`, '운영 설계 관계는 Deployment 배치안에 표시 엣지가 하나 이상 있어야 합니다.');
+    }
+  }
 
   for (const [id, component] of Object.entries(components)) {
     if (component?.type === 'aws.eks' && !eksNodes.has(id)) {
@@ -486,8 +629,8 @@ function validateModel(model) {
 }
 
 // 저장된 값이 아니라 모델에서 매번 다시 계산하는 배치 경고. Draft 조회(GET)도 저장 응답과 같은 규칙을 돌려준다
-// (V11: Sprint 7 Process 위치, V16: Sprint 10 AWS 배치 — Sprint 11 Step 1에서 조회 누락 수정)
-const PLACEMENT_RULES = new Set(['V11', 'V16']);
+// (V11: Sprint 7 Process 위치, V16: Sprint 10 AWS 배치 — Sprint 11 Step 1에서 조회 누락 수정, V19: Sprint 11 VM 복귀)
+const PLACEMENT_RULES = new Set(['V11', 'V16', 'V19']);   // Sprint 11: V19 VM 복귀 대상 경고
 const placementWarnings = (model) => validateModel(model).warnings.filter((w) => PLACEMENT_RULES.has(w.rule));
 
-module.exports = { FLOW_LIMITS, validateModel, placementWarnings, PLACEMENT_RULES, MODEL_MAX_BYTES, MODEL_MAX_COMPONENTS, REGISTRY, NOTE_TEXT_MAX, GROUP_MIN_SIZE, MAX_DEPLOYMENT_VIEWS, VARIANT_MAX, STRATEGY_MAX_BYTES };
+module.exports = { FLOW_LIMITS, STRATEGY_LIMITS, OPS_RELATION_TYPES, validateModel, placementWarnings, PLACEMENT_RULES, MODEL_MAX_BYTES, MODEL_MAX_COMPONENTS, REGISTRY, NOTE_TEXT_MAX, GROUP_MIN_SIZE, MAX_DEPLOYMENT_VIEWS, VARIANT_MAX, STRATEGY_MAX_BYTES };

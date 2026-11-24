@@ -1,12 +1,13 @@
 {
-  "version": 4,
+  "version": 5,
   "categories": [
     { "key": "application", "label": "Application" },
     { "key": "data", "label": "Data" },
     { "key": "general", "label": "General" },
     { "key": "deployment", "label": "Deployment" },
     { "key": "aws", "label": "AWS" },
-    { "key": "kubernetes", "label": "Kubernetes" }
+    { "key": "kubernetes", "label": "Kubernetes" },
+    { "key": "operations", "label": "Operations" }
   ],
   "propertyTypes": ["string", "text", "number", "boolean", "enum", "list"],
   "types": {
@@ -495,6 +496,81 @@
           "label": "Multi-AZ",
           "type": "boolean"
         }
+      ]
+    },
+    "ops.metrics": {
+      "label": "Prometheus (메트릭)", "category": "operations", "layer": "ops", "icon": "📈", "nodeKind": "component", "views": ["deployment"],
+      "aliases": ["prometheus", "metrics", "메트릭"],
+      "properties": [
+        { "key": "scrapeInterval", "label": "수집 주기", "type": "string", "pattern": "^[1-9][0-9]*(s|m|h)$", "placeholder": "30s" },
+        { "key": "target", "label": "수집 대상", "type": "string", "placeholder": "/metrics" },
+        { "key": "metrics", "label": "지표", "type": "list" },
+        { "key": "dashboardNote", "label": "대시보드 메모", "type": "text" }
+      ]
+    },
+    "ops.alerting": {
+      "label": "알림 규칙", "category": "operations", "layer": "ops", "icon": "🔔", "nodeKind": "component", "views": ["deployment"],
+      "aliases": ["alertmanager", "alert", "알림"],
+      "properties": [
+        { "key": "expr", "label": "판단 식", "type": "string", "placeholder": "histogram_quantile(0.95, …) > 0.3" },
+        { "key": "threshold", "label": "임계값", "type": "string", "placeholder": "300ms" },
+        { "key": "for", "label": "지속 시간", "type": "string", "pattern": "^[1-9][0-9]*(s|m|h)$", "placeholder": "5m" },
+        { "key": "channel", "label": "채널 유형", "type": "enum", "options": ["slack", "email", "pagerduty", "webhook", "other"] },
+        { "key": "receiverRole", "label": "수신 역할", "type": "string", "placeholder": "on-call" }
+      ]
+    },
+    "ops.collector": {
+      "label": "Collector / Agent", "category": "operations", "layer": "ops", "icon": "⇲", "nodeKind": "component", "views": ["deployment"],
+      "aliases": ["otel", "collector", "agent", "fluent"],
+      "properties": [
+        { "key": "maskingAt", "label": "마스킹 위치", "type": "enum", "options": ["app", "agent", "collector"] },
+        { "key": "maskFields", "label": "마스킹 필드", "type": "list" },
+        { "key": "retentionDays", "label": "보존 기간(일)", "type": "number", "integer": true, "min": 1, "max": 3650 },
+        { "key": "sampleRate", "label": "트레이스 샘플링 비율", "type": "number", "min": 0, "max": 1 }
+      ]
+    },
+    "ops.telemetry": {
+      "label": "로그·트레이스 백엔드", "category": "operations", "layer": "ops", "icon": "🐾", "nodeKind": "component", "views": ["deployment"],
+      "aliases": ["datadog", "loki", "tempo", "jaeger", "elastic"],
+      "properties": [
+        { "key": "provider", "label": "제공자", "type": "string", "placeholder": "Datadog" },
+        { "key": "retentionDays", "label": "보존 기간(일)", "type": "number", "integer": true, "min": 1, "max": 3650 }
+      ]
+    },
+    "ops.ci": {
+      "label": "CI", "category": "operations", "layer": "ops", "icon": "⚙", "nodeKind": "component", "views": ["deployment"],
+      "aliases": ["github actions", "jenkins", "gitlab ci", "ci"],
+      "properties": [
+        { "key": "provider", "label": "제공자", "type": "string", "placeholder": "GitHub Actions" },
+        { "key": "stages", "label": "단계", "type": "list" }
+      ]
+    },
+    "ops.registry": {
+      "label": "이미지 Registry", "category": "operations", "layer": "ops", "icon": "▤", "nodeKind": "component", "views": ["deployment"],
+      "aliases": ["ecr", "ghcr", "registry", "harbor"],
+      "properties": [
+        { "key": "provider", "label": "제공자", "type": "string", "placeholder": "ECR" },
+        { "key": "tagRule", "label": "이미지 태그 규칙", "type": "string", "placeholder": "git sha, digest 고정" }
+      ]
+    },
+    "ops.config_repo": {
+      "label": "배포 설정 Git", "category": "operations", "layer": "ops", "icon": "⎇", "nodeKind": "component", "views": ["deployment"],
+      "aliases": ["gitops repo", "deploy config", "manifests"],
+      "properties": [
+        { "key": "repo", "label": "저장소", "type": "string", "placeholder": "deploy-config" },
+        { "key": "path", "label": "경로", "type": "string", "placeholder": "apps/query-api" }
+      ]
+    },
+    "ops.gitops": {
+      "label": "GitOps (Argo CD)", "category": "operations", "layer": "ops", "icon": "⟳", "nodeKind": "component", "views": ["deployment"],
+      "aliases": ["argo cd", "argocd", "flux", "gitops"],
+      "properties": [
+        { "key": "provider", "label": "제공자", "type": "string", "placeholder": "Argo CD" },
+        { "key": "stagingSync", "label": "staging 동기화", "type": "enum", "options": ["auto", "manual"] },
+        { "key": "prodSync", "label": "prod 동기화", "type": "enum", "options": ["auto", "manual"] },
+        { "key": "approvalRole", "label": "승인 역할", "type": "string", "placeholder": "owner" },
+        { "key": "healthCheck", "label": "상태 확인", "type": "string", "placeholder": "/healthz, Rollout Healthy" },
+        { "key": "rollbackRule", "label": "롤백 기준", "type": "string", "placeholder": "배포 후 10분 오류율 > 2%" }
       ]
     }
   }

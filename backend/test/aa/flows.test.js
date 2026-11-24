@@ -72,7 +72,7 @@ describe('요구사항 참조 경로에 flows', () => {
     flow(m).requirementIds = [R9];
     const snap = buildSnapshot(m, [{ id: R9, code: 'NFR-009', kind: 'nfr', title: 'flow only' }]);
     assert.deepEqual(Object.keys(snap), [R9]);
-    assert.deepEqual(references(m, R9), { componentIds: [], relationIds: [], flowIds: ['flw_reportlist'] });
+    assert.deepEqual(references(m, R9), { componentIds: [], relationIds: [], flowIds: ['flw_reportlist'], strategyGates: [] });   // Sprint 11: strategyGates
   });
 });
 

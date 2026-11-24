@@ -1,7 +1,21 @@
 // 발행 시 저장하는 Diff 요약 (Sprint 6 Step 1 · Q5 · 03 §4).
 // 버전은 불변이라 발행 때 요약을 확정한다. 상세 changes·Compare 화면은 Sprint 7.
 // 입력은 model-canon과 같은 정규화를 거친다 → 해시가 다르면 요약의 어느 수든 0보다 크다.
-const { HASH_VERSION, canonModel, canonicalJson, clusterRefFor, layoutChanges } = require('./model-canon');
+const { HASH_VERSION, canonModel, canonicalJson, canonStrategy, clusterRefFor, layoutChanges } = require('./model-canon');
+
+// Sprint 11: 배포 전략 = Markdown(strategyMd) + 구조화(strategy). 둘 중 하나라도 바뀌면 전략 변경
+const STRATEGY_PARTS = ['release', 'gates', 'rollback', 'fallback', 'environments', 'dbChange'];
+const strategyKey = (v) => canonicalJson({ md: v?.strategyMd ?? '', st: v?.strategy == null ? null : canonStrategy(v.strategy) });
+const hasStrategy = (v) => Boolean(v?.strategyMd) || (v?.strategy !== undefined && v?.strategy !== null);
+/** 바뀐 하위 항목 (Compare 문구용) */
+function strategyParts(o, v) {
+  const parts = [];
+  if ((o?.strategyMd ?? '') !== (v?.strategyMd ?? '')) parts.push('markdown');
+  const a = o?.strategy == null ? {} : canonStrategy(o.strategy);
+  const b = v?.strategy == null ? {} : canonStrategy(v.strategy);
+  for (const k of STRATEGY_PARTS) if (canonicalJson(a[k] ?? null) !== canonicalJson(b[k] ?? null)) parts.push(k);
+  return parts;
+}
 const { compareSnapshots } = require('./requirements-snapshot');
 
 const withoutReqs = ({ requirementIds, ...rest }) => rest;   // eslint-disable-line no-unused-vars
@@ -70,8 +84,9 @@ function summarize(prev, next) {
   const views = diffViews(a.views, b.views);
   const reqs = compareSnapshots(prev.snapshot, next.snapshot);
   // Sprint 7: 같은 View id의 배포 전략 변경·삭제 (추가·삭제된 배치안은 viewChanges)
-  const beforeViews = new Map(a.views.map((v) => [v.id, v.strategyMd ?? '']));
-  const strategiesChanged = b.views.filter((v) => beforeViews.has(v.id) && beforeViews.get(v.id) !== (v.strategyMd ?? '')).length;
+  // Sprint 11: 구조화 전략(strategy)도 같은 수에 포함
+  const beforeViews = new Map(a.views.map((v) => [v.id, strategyKey(v)]));
+  const strategiesChanged = b.views.filter((v) => beforeViews.has(v.id) && beforeViews.get(v.id) !== strategyKey(v)).length;
   return {
     hashVersion: HASH_VERSION,
     componentsAdded: comp.added,
@@ -183,8 +198,11 @@ function diffModels(prev, next, opts = {}) {
     if ((o.variant ?? null) !== (v.variant ?? null) || o.name !== v.name) {
       changes.push({ kind: 'view.renamed', viewId: id, viewKind: v.kind, before: o.variant ?? o.name, after: v.variant ?? v.name });
     }
-    if ((o.strategyMd ?? '') !== (v.strategyMd ?? '')) {
-      changes.push({ kind: 'view.strategy', viewId: id, variant: v.variant ?? v.name, change: !o.strategyMd ? 'added' : !v.strategyMd ? 'removed' : 'modified' });
+    if (strategyKey(o) !== strategyKey(v)) {
+      const change = { kind: 'view.strategy', viewId: id, variant: v.variant ?? v.name, change: !hasStrategy(o) ? 'added' : !hasStrategy(v) ? 'removed' : 'modified', parts: strategyParts(o, v) };
+      // Sprint 11 (C2): 복귀 정책이 있는데 대상이 비어 있으면 Compare에 경고
+      if (v.strategy?.fallback && v.strategy.fallback.targetViewId === undefined) change.warnings = ['fallback-unset'];
+      changes.push(change);
     }
     const oldCluster = clusterRefFor(A, o);
     const newCluster = clusterRefFor(B, v);

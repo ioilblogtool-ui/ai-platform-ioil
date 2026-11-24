@@ -2,7 +2,7 @@ const express = require('express');
 const db = require('../../lib/supabase');
 const { sendError, wrap, UUID_RE } = require('../../lib/aa/errors');
 const { scanForSecrets } = require('../../lib/aa/sensitive-scan');
-const { references } = require('../../lib/aa/requirement-refs');
+const { inUse, references } = require('../../lib/aa/requirement-refs');
 
 const router = express.Router({ mergeParams: true });
 const kinds = new Set(['fr', 'nfr']);
@@ -154,7 +154,7 @@ router.delete('/:reqId', wrap(async (req, res) => {
   const { data: draft, error: draftError } = await scope(db.from('aa_architecture_drafts').select('model'), req).maybeSingle();
   if (draftError) throw draftError;
   const details = references(draft?.model, requirement.id);
-  if (details.componentIds.length || details.relationIds.length || details.flowIds.length) {
+  if (inUse(details)) {
     return sendError(res, 409, 'IN_USE', '설계에서 사용 중인 요구사항입니다.', details);
   }
   const { data, error } = await scope(db.from('aa_requirements').delete().eq('id', id), req).select('id').maybeSingle();
