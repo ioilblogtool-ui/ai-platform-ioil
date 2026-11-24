@@ -3,7 +3,7 @@
 // View 탭 (Sprint 7 · 04 SCR-06 `[Logical] [Deployment ▾]`, §6.10 배치안 메뉴).
 // 배치안 = deployment View. 추가(빈 배치안 / 지금 배치안 복제)·이름 바꾸기·삭제(확인 창).
 import { useState, type CSSProperties } from 'react';
-import { eksPlacements, deploymentViewSummary, MAX_DEPLOYMENT_VIEWS, VARIANT_MAX } from '@/lib/aa/model-ops';
+import { eksPlacements, deploymentViewSummary, MAX_DEPLOYMENT_VIEWS, VARIANT_MAX, fallbackReferrers } from '@/lib/aa/model-ops';
 import { useStudio } from '@/lib/aa/studio-store';
 import type { InspectorEdits } from './SchemaForm';
 
@@ -62,6 +62,8 @@ export default function ViewTabs({ edits }: { edits: InspectorEdits }) {
   const detached = summary && infraKind === 'aws'
     ? s.model.views.filter((v) => v.clusterRef && current?.nodes.some((n) => n.componentId === v.clusterRef)).length
     : 0;
+  // Sprint 11 (C2): 이 배치안을 VM 복귀 대상으로 쓰는 전략
+  const fallbackRefs = summary && s.model ? fallbackReferrers(s.model, s.viewId) : [];
 
   return (
     <div style={{ flexShrink: 0, padding: '6px 12px', borderBottom: '1px solid rgba(255,255,255,0.07)', background: '#09090b', position: 'relative' }}
@@ -126,6 +128,7 @@ export default function ViewTabs({ edits }: { edits: InspectorEdits }) {
             <b>{summary.variant} 삭제</b>
             <span>이 View에만 있는 컴포넌트 {summary.ownComponents}개와 그 관계 {summary.relations}개(구현 연결 포함)를 함께 지웁니다. Logical 설계는 그대로입니다.</span>
             {detached > 0 && <span>K8s View {detached}개가 클러스터 미지정 상태가 됩니다. 워크로드는 보존됩니다.</span>}
+            {fallbackRefs.length > 0 && <span data-testid="aa-view-delete-fallback">VM 복귀 대상 {fallbackRefs.length}건이 미지정이 됩니다({fallbackRefs.join(', ')}). 복귀 정책 문구는 그대로입니다.</span>}
             <span style={hint}>삭제는 자동 저장됩니다. 이미 발행한 버전의 구성은 유지됩니다.</span>
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
               <button style={item} onClick={close} data-testid="aa-view-delete-cancel">취소</button>

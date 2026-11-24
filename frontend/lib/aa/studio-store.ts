@@ -3,6 +3,7 @@
 // Architecture Studio 상태 (D-05 Zustand). 도메인 모델이 진실의 원천이다 (02 §3.1, §5).
 // 모델 변경은 model-ops를 사용한다. 자동 저장과 수동 저장은 같은 revision 경로를 거친다.
 import type { OpsRelationType } from './ops-relations';
+import type { DeploymentStrategy } from './architecture-types';
 // Sprint 11: 조회·저장 때마다 다시 계산하는 배치 경고 (V11 Process 위치 · V16 AWS · V19 VM 복귀)
 const PLACEMENT_RULES = new Set(['V11', 'V16', 'V19']);
 import { create } from 'zustand';
@@ -124,6 +125,8 @@ type StudioState = {
   createKubernetesForEks: (clusterId: string) => string | null;
   setClusterRef: (clusterId?: string) => void;
   setStrategy: (strategyMd: string) => void;
+  /** Sprint 11: 지금 배치안(deployment·aws)의 구조화 전략. null = 삭제 */
+  setStructuredStrategy: (strategy: DeploymentStrategy | null) => void;
   setRealizes: (fromId: string, toId: string, on: boolean) => void;
   loadRequirements: () => Promise<void>;
   clearSelection: () => void;
@@ -476,6 +479,10 @@ export const useStudio = create<StudioState>((set, get) => {
 
     setClusterRef(clusterId) {
       edit((model, viewId) => ops.setClusterRef(model, viewId, clusterId));
+    },
+
+    setStructuredStrategy(strategy) {
+      edit((m, vid) => ops.setStructuredStrategy(m, vid, strategy));
     },
 
     setStrategy(strategyMd) {

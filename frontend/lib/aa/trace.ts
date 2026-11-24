@@ -14,6 +14,8 @@ export interface TraceResult {
   components: { id: string; name: string; type: string; nodeId?: string }[];
   relations: { id: string; from: string; to: string; label: string }[];
   flows: { id: string; name: string; endpoint?: string; linked: boolean; measured: boolean }[];
+  /** Sprint 11 (Q8): 이 요구사항을 진행·중단 기준으로 쓰는 배치안 전략 게이트 */
+  strategyGates: { viewId: string; variant: string; name: string; metric: string; threshold: string; observeMin: number }[];
   measurement: RequirementMeasurement;
   /** 측정 기준의 flowId가 Draft에 없음 (흐름 삭제·복원으로 끊김) */
   measurementFlowMissing: boolean;
@@ -46,7 +48,11 @@ export function computeTrace(req: Pick<Requirement, 'id' | 'kind'> & { measureme
     if (!Object.keys(measurement).length) gaps.push('no-measurement');
     if (measurementFlowMissing) gaps.push('measurement-flow-missing');
   }
-  return { components, relations, flows, measurement, measurementFlowMissing, gaps };
+  // Sprint 11 (Q8): 전략 게이트 — strategy-ops.strategyGatesFor와 같은 규칙 (런타임 import 없이)
+  const strategyGates = m.views.flatMap((v) => (v.strategy?.gates ?? [])
+    .filter((g) => g.requirementIds.includes(req.id))
+    .map((g) => ({ viewId: v.id, variant: v.variant ?? v.name, name: g.name, metric: g.metric, threshold: g.threshold, observeMin: g.observeMin })));
+  return { components, relations, flows, strategyGates, measurement, measurementFlowMissing, gaps };
 }
 
 export const MEASUREMENT_FIELDS: { key: 'endpoint' | 'environment' | 'load' | 'method'; label: string; placeholder: string }[] = [

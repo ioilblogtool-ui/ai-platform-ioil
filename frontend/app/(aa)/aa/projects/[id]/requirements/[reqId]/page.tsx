@@ -105,6 +105,9 @@ function Trace({ id, reqId }: { id: string; reqId: string }) {
                 {trace.relations.map((r) => (
                   <div key={r.id} style={{ ...item, cursor: 'default' }}>{r.from} → {r.to} {r.label && <span style={muted}>{r.label}</span>}</div>
                 ))}
+                {trace.strategyGates.map((g, i) => (
+                  <div key={`${g.viewId}:${i}`} style={{ ...item, cursor: 'default' }} data-testid="aa-trace-gate">◆ {g.variant} · {g.name} <span style={muted}>{g.metric} {g.threshold} · 관찰 {g.observeMin}분</span></div>
+                ))}
                 {!trace.components.length && !trace.relations.length && (
                   <div style={gapBox}>⚠ 연결된 컴포넌트 없음<Button size="sm" onClick={() => studio('')}>Studio에서 연결</Button></div>
                 )}

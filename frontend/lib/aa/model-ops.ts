@@ -2,7 +2,7 @@
 // 모든 함수는 입력 모델을 바꾸지 않고 새 모델을 돌려준다. 바꿀 것이 없거나 거부되면 입력 모델을 그대로 돌려준다.
 //
 // 좌표 기준: parentId가 있으면 position은 부모 그룹 좌상단 기준 상대 좌표, 없으면 캔버스 절대 좌표 (React Flow sub-flow와 같음).
-import type { ArchitectureModel, Component, PropertyDef, Relation, RelationType, RetryBackoff, TypeRegistry, View, ViewNode } from './architecture-types';
+import type { ArchitectureModel, Component, DeploymentStrategy, PropertyDef, Relation, RelationType, RetryBackoff, TypeRegistry, View, ViewNode } from './architecture-types';
 import { defaultRelationType, isOpsRelationType, pruneOrphanOpsRelations, repairOpsRelations, type OpsRelationType } from './ops-relations.ts';
 
 export type NewId = (prefix: 'cmp' | 'rel' | 'nd' | 'ed' | 'view') => string;
@@ -863,6 +863,15 @@ export function renameDeploymentView(model: ArchitectureModel, viewId: string, v
   if (error) return { model, error };
   if (v.variant === variant.trim()) return { model };
   return { model: withView(model, viewId, (_m, vv) => { vv.variant = variant.trim(); }) };
+}
+
+/** Sprint 11: 구조화 전략 설정·삭제(null). deployment·aws 배치안만. 같은 값이면 입력 모델 그대로 */
+export function setStructuredStrategy(model: ArchitectureModel, viewId: string, strategy: DeploymentStrategy | null): ArchitectureModel {
+  return withView(model, viewId, (_m, v) => {
+    if (v.kind !== 'deployment' && v.kind !== 'aws') return false;
+    if (JSON.stringify(v.strategy ?? null) === JSON.stringify(strategy)) return false;
+    if (strategy) v.strategy = structuredClone(strategy); else delete v.strategy;
+  });
 }
 
 export function setStrategy(model: ArchitectureModel, viewId: string, strategyMd: string): ArchitectureModel {
