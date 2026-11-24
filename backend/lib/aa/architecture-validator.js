@@ -431,7 +431,7 @@ function validateModel(model) {
         }
         return null;
       };
-      const warn = (node, message) => warnings.push({ rule: 'V16', path: `${vp}.nodes(${node.id})`, viewId: v.id, nodeId: node.id, message });
+      const warn = (node, message) => warnings.push({ rule: 'V16', code: 'V16', path: `${vp}.nodes(${node.id})`, viewId: v.id, nodeId: node.id, message });
       const zones = new Map();
       for (const node of nodesById.values()) {
         if (components[node.componentId]?.type !== 'aws.az') continue;
@@ -485,4 +485,9 @@ function validateModel(model) {
   return { errors, warnings, tooLarge: null };
 }
 
-module.exports = { FLOW_LIMITS, validateModel, MODEL_MAX_BYTES, MODEL_MAX_COMPONENTS, REGISTRY, NOTE_TEXT_MAX, GROUP_MIN_SIZE, MAX_DEPLOYMENT_VIEWS, VARIANT_MAX, STRATEGY_MAX_BYTES };
+// 저장된 값이 아니라 모델에서 매번 다시 계산하는 배치 경고. Draft 조회(GET)도 저장 응답과 같은 규칙을 돌려준다
+// (V11: Sprint 7 Process 위치, V16: Sprint 10 AWS 배치 — Sprint 11 Step 1에서 조회 누락 수정)
+const PLACEMENT_RULES = new Set(['V11', 'V16']);
+const placementWarnings = (model) => validateModel(model).warnings.filter((w) => PLACEMENT_RULES.has(w.rule));
+
+module.exports = { FLOW_LIMITS, validateModel, placementWarnings, PLACEMENT_RULES, MODEL_MAX_BYTES, MODEL_MAX_COMPONENTS, REGISTRY, NOTE_TEXT_MAX, GROUP_MIN_SIZE, MAX_DEPLOYMENT_VIEWS, VARIANT_MAX, STRATEGY_MAX_BYTES };

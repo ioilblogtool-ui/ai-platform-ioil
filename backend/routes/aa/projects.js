@@ -6,7 +6,7 @@ const supabase = require('../../lib/supabase');
 const { requireAuth } = require('../../middleware/auth');
 const { loadProject } = require('../../middleware/aa-project');
 const { sendError, wrap } = require('../../lib/aa/errors');
-const { validateModel } = require('../../lib/aa/architecture-validator');
+const { validateModel, placementWarnings } = require('../../lib/aa/architecture-validator');
 const { scanForSecrets } = require('../../lib/aa/sensitive-scan');
 const { emptyModel, README_TEMPLATE } = require('../../lib/aa/empty-model');
 
@@ -254,8 +254,8 @@ router.get('/:projectId/architecture', wrap(async (req, res) => {
     if (vErr) throw vErr;
     if (v) baseVersion = { id: v.id, label: v.label, versionNo: v.version_no };
   }
-  // V11(배치안의 Process 위치)은 저장된 값이 아니라 조회할 때마다 다시 계산해 돌려준다 (Sprint 7)
-  const all = [...warnings, ...validateModel(model).warnings.filter((w) => w.rule === 'V11')];
+  // 배치 경고(V11 Process 위치, V16 AWS 배치)는 저장된 값이 아니라 조회할 때마다 다시 계산해 돌려준다 (Sprint 7·10)
+  const all = [...warnings, ...placementWarnings(model)];
   res.json({ data: { model, revision: data.revision, baseVersion, updatedAt: data.updated_at }, ...(all.length ? { warnings: all } : {}) });
 }));
 
