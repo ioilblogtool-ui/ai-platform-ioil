@@ -205,7 +205,7 @@ describe('removeNodes / removeEdges', () => {
     m = ops.connect(m, VIEW, a, b, {}, newId).model;
     m = ops.addNote(m, VIEW, { x: 0, y: 500 }, 'memo', newId).model;
     const note = view(m).nodes.find((n) => n.kind === 'note').id;
-    assert.deepEqual(ops.deleteSummary(m, VIEW, [a]), { componentCount: 1, relationCount: 1, otherViewCount: 0, flowCount: 0, flowsUnderTwo: [], needsConfirm: true });
+    assert.deepEqual(ops.deleteSummary(m, VIEW, [a]), { componentCount: 1, relationCount: 1, otherViewCount: 0, flowCount: 0, flowsUnderTwo: [], includesEks: false, detachedClusters: 0, needsConfirm: true });
     assert.equal(ops.deleteSummary(m, VIEW, [g, note]).needsConfirm, false);
   });
 

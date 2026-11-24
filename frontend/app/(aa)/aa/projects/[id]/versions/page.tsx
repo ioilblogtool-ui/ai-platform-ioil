@@ -14,6 +14,8 @@ import MiniCanvas from '@/components/aa/MiniCanvas';
 import { AaApiError, getAaProject, getDraft, getVersion, listVersions, restoreVersion } from '@/lib/aa/architecture-api';
 import type { DraftResponse, VersionDetail, VersionListItem } from '@/lib/aa/architecture-types';
 import { miniCanvasLayout } from '@/lib/aa/overview';
+import { viewLabel } from '@/lib/aa/compare-format';
+import { eksPlacements } from '@/lib/aa/model-ops';
 import { layoutNote, summaryParts } from '@/lib/aa/version-format';
 
 const muted: CSSProperties = { color: 'rgba(255,255,255,0.45)', fontSize: 12.5 };
@@ -173,10 +175,64 @@ function Versions({ id }: { id: string }) {
   );
 }
 
+const infraEnabled = process.env.NEXT_PUBLIC_AA_INFRA_VIEWS !== 'false';
+
+function VersionDiagram({ detail }: { detail: VersionDetail }) {
+  const model = detail.model;
+  const views = model.views.filter((v) => v.kind === 'logical' || v.kind === 'deployment'
+    || (infraEnabled && (v.kind === 'aws' || v.kind === 'kubernetes')));
+  const [selection, setSelection] = useState<{ viewId: string; nodeId?: string }>({ viewId: 'view_logical' });
+  const current = views.find((v) => v.id === selection.viewId) ?? views[0];
+  const label = current ? viewLabel(current) : 'Logical';
+  const layout = current ? miniCanvasLayout(model, current.id) : null;
+  const placements = infraEnabled ? eksPlacements(model) : [];
+  const links = current?.kind === 'aws' ? placements.filter((p) => p.viewId === current.id) : [];
+  const owner = current?.kind === 'kubernetes' && current.clusterRef
+    ? placements.filter((p) => p.componentId === current.clusterRef)
+    : [];
+  const cluster = owner.length === 1 ? owner[0] : undefined;
+
+  return (
+    <Card>
+      <b style={{ fontSize: 13.5 }}>구성도 · {label}</b>
+      {views.length > 1 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+          {views.map((v) => (
+            <Button key={v.id} size="sm" aria-pressed={current?.id === v.id} onClick={() => setSelection({ viewId: v.id })}>
+              {viewLabel(v)}
+            </Button>
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: 10 }}>
+        {layout ? <MiniCanvas layout={layout} label={`${detail.label} ${label}`} testId="aa-version-canvas"
+          highlight={selection.nodeId ? new Set([selection.nodeId]) : undefined} /> : <span style={muted}>그린 컴포넌트가 없습니다.</span>}
+      </div>
+      {links.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 10 }}>
+          {links.map((p) => {
+            const workloads = views.find((v) => v.kind === 'kubernetes' && v.clusterRef === p.componentId);
+            return workloads
+              ? <Button key={p.nodeId} size="sm" onClick={() => setSelection({ viewId: workloads.id })}>{p.name} · K8s 워크로드 보기 ▸</Button>
+              : <span key={p.nodeId} style={muted}>{p.name} · 연결된 K8s View 없음</span>;
+          })}
+        </div>
+      )}
+      {current?.kind === 'kubernetes' && (
+        <div style={{ marginTop: 10 }}>
+          {cluster
+            ? <Button size="sm" onClick={() => setSelection({ viewId: cluster.viewId, nodeId: cluster.nodeId })}>◂ {cluster.variant} · {cluster.name}</Button>
+            : <span style={muted}>{current.clusterRef ? '연결 불가' : '클러스터 미지정'}</span>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function VersionDetailView({ projectId, detail, onRestore, onCompare, previousId }: { projectId: string; detail: VersionDetail; onRestore: () => void; onCompare: (from: string, to: string) => void; previousId: string | null }) {
   const [showReadme, setShowReadme] = useState(false);
   const [componentId, setComponentId] = useState('');
-  const layout = miniCanvasLayout(detail.model);
+
   const components = Object.values(detail.model.components).sort((a, b) => a.name.localeCompare(b.name));
   const nameOf = (cid: string) => detail.model.components[cid]?.name ?? '?';
   const relations = Object.values(detail.model.relations);
@@ -214,12 +270,7 @@ function VersionDetailView({ projectId, detail, onRestore, onCompare, previousId
         </div>}
       </Card>
 
-      <Card>
-        <b style={{ fontSize: 13.5 }}>구성도 · Logical</b>
-        <div style={{ marginTop: 10 }}>
-          {layout ? <MiniCanvas layout={layout} label={`${detail.label} Logical View`} testId="aa-version-canvas" /> : <span style={muted}>그린 컴포넌트가 없습니다.</span>}
-        </div>
-      </Card>
+      <VersionDiagram detail={detail} />
 
       <Card>
         <b style={{ fontSize: 13.5 }}>발행 당시 요구사항</b>

@@ -54,8 +54,12 @@ export function fieldText(f: FieldChange): string {
 const linkText = (added: string[], removed: string[]) =>
   [added.length ? `+ ${added.join(', ')}` : null, removed.length ? `− ${removed.join(', ')}` : null].filter(Boolean).join(' · ');
 
-export function viewLabel(meta: Pick<CompareViewMeta, 'kind' | 'name' | 'variant'>): string {
-  return meta.kind === 'deployment' ? `배치안 · ${meta.variant ?? meta.name}` : meta.name;
+export function viewLabel(meta: Pick<CompareViewMeta, 'kind' | 'name'> & { variant?: string | null }): string {
+  if (meta.kind === 'deployment') return `배치안 · ${meta.variant ?? meta.name}`;
+  if (meta.kind === 'aws' || meta.kind === 'kubernetes') {
+    return meta.variant ? `${meta.kind === 'aws' ? 'AWS' : 'K8s'} · ${meta.variant}` : meta.name;
+  }
+  return meta.name;
 }
 
 function describe(c: CompareChange, viewName: (id: string) => string): { group: GroupKey; item: CompareItem } {
@@ -92,6 +96,9 @@ function describe(c: CompareChange, viewName: (id: string) => string): { group: 
       return { group: 'view', item: { change: c, tone: 'removed', text: `${c.viewKind === 'deployment' ? '배치안' : 'View'} 삭제 · ${c.variant}`, viewId: c.viewId } };
     case 'view.renamed':
       return { group: 'view', item: { change: c, tone: 'modified', text: `${c.viewKind === 'deployment' ? '배치안' : 'View'} 이름 · ${c.before} → ${c.after}`, viewId: c.viewId } };
+    case 'view.cluster':
+      return { group: 'view', item: { change: c, tone: 'modified', text: `K8s 클러스터 연결 · ${viewName(c.viewId)}`,
+        detail: `${c.before ?? '미지정'} → ${c.after ?? '미지정'}`, viewId: c.viewId } };
     case 'view.strategy':
       return { group: 'view', item: { change: c, tone: c.change === 'added' ? 'added' : c.change === 'removed' ? 'removed' : 'modified',
         text: `배포 전략 ${c.change === 'added' ? '작성' : c.change === 'removed' ? '삭제' : '수정'} · ${c.variant}`, viewId: c.viewId } };
@@ -109,6 +116,8 @@ function describe(c: CompareChange, viewName: (id: string) => string): { group: 
     case 'layout.resized':
       return { group: 'layout', item: { change: c, tone: 'modified', text: `${viewName(c.viewId)} · ${c.name} 크기`, viewId: c.viewId } };
   }
+  const unknown = c as { kind: string };
+  return { group: 'view', item: { change: c, tone: 'modified', text: `기타 변경 · ${unknown.kind}` } };
 }
 
 /** 종류별로 묶은 변경 목록 (빈 묶음은 뺀다) */

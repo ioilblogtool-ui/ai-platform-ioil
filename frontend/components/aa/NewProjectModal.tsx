@@ -8,7 +8,7 @@ import { createAaProject, AaApiError } from '@/lib/aa/architecture-api';
 export default function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [template, setTemplate] = useState<'empty' | 'sample-reports'>('empty');
+  const [template, setTemplate] = useState<'empty' | 'sample-reports' | 'sample-migration'>('empty');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,11 +44,13 @@ export default function NewProjectModal({ onClose, onCreated }: { onClose: () =>
             {([
               ['empty', '빈 프로젝트', '직접 그리거나 Mermaid로 가져오기'],
               ['sample-reports', '샘플: AI Platform Reports', '웹 앱 · API · DB · 인증 4개 컴포넌트'],
-            ] as const).map(([key, title, sub]) => (
+              ['sample-migration', '샘플: TIDAMUNGU 조회 API', 'VM → AWS EKS 병행 전환 · 합성 데이터'],
+            ] as const).filter(([key]) => key !== 'sample-migration' || process.env.NEXT_PUBLIC_AA_INFRA_VIEWS !== 'false').map(([key, title, sub]) => (
               <button key={key} type="button" role="radio" aria-checked={template === key} data-testid={`aa-template-${key}`}
                 onClick={() => {
                   setTemplate(key);
                   if (key === 'sample-reports' && !name.trim()) setName('AI Platform Reports (샘플)');
+                  if (key === 'sample-migration' && (!name.trim() || name === 'AI Platform Reports (샘플)')) setName('TIDAMUNGU 조회 API (사례·합성)');
                 }}
                 style={{
                   textAlign: 'left', padding: '10px 12px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',

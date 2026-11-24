@@ -10,15 +10,22 @@ import { CATEGORY_COLOR, TRUST_COLOR, TYPE_FALLBACK } from './palette-meta';
 
 export default function ContainerNode({ data, selected }: NodeProps<AaContainerFlowNode>) {
   const meta = TYPE_FALLBACK[data.type] ?? { icon: '▣', category: 'deployment' };
-  const color = data.type === 'dep.zone' && data.trust ? TRUST_COLOR[data.trust] ?? CATEGORY_COLOR.deployment : CATEGORY_COLOR.deployment;
-  const border = selected ? '#c8a96e' : color;
+  const subnet = data.type === 'aws.subnet';
+  const publicSubnet = data.tier === 'public';
+  const color = subnet ? (publicSubnet ? '#7ee2b8' : '#93c5fd')
+    : data.type === 'aws.vpc' ? '#a78bfa'
+      : data.type === 'aws.az' ? 'rgba(255,255,255,0.32)'
+        : data.type === 'dep.zone' && data.trust ? TRUST_COLOR[data.trust] ?? CATEGORY_COLOR.deployment : CATEGORY_COLOR[meta.category];
+  const background = subnet ? (publicSubnet ? 'rgba(62,207,142,0.04)' : 'rgba(79,156,249,0.04)') : undefined;
+  const quietAwsBoundary = data.type.startsWith('aws.') && !subnet;
+  const border = selected ? '#c8a96e' : quietAwsBoundary ? 'rgba(180,190,210,0.24)' : color;
   const isZone = data.type === 'dep.zone' || data.type === 'dep.environment';
   const handle: React.CSSProperties = { width: 8, height: 8, background: '#c8a96e', borderStyle: 'solid', borderWidth: 2, borderColor: '#121215' };
 
   return (
     <div data-testid="aa-container" data-type={data.type} style={{
       width: '100%', height: '100%', boxSizing: 'border-box', borderRadius: 10,
-      background: isZone ? 'rgba(255,255,255,0.015)' : 'rgba(94,196,182,0.04)',
+      background: background ?? (isZone ? 'rgba(255,255,255,0.015)' : 'rgba(94,196,182,0.04)'),
       borderStyle: isZone ? 'dashed' : 'solid', borderWidth: isZone ? 1.5 : 1,
       borderTopColor: border, borderRightColor: border, borderBottomColor: border, borderLeftColor: border,
     }}>
@@ -30,7 +37,7 @@ export default function ContainerNode({ data, selected }: NodeProps<AaContainerF
         <span style={{ color }}>{meta.icon}</span>
         <b style={{ color: 'rgba(255,255,255,0.8)' }}>{data.name}</b>
         <span style={{ color: 'rgba(255,255,255,0.45)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {data.type === 'dep.zone' ? `zone · ${data.trust ?? ''}` : data.technology || data.type.replace(/^dep\./, '')}
+          {data.type === 'dep.zone' ? `zone · ${data.trust ?? ''}` : data.tier || data.technology || data.type.replace(/^dep\./, '')}
         </span>
       </div>
       {!isZone && <Handle type="source" position={Position.Right} style={handle} />}

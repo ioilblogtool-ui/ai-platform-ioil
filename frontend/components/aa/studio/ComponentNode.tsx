@@ -26,6 +26,7 @@ export default function ComponentNode({ data, selected }: NodeProps<AaComponentF
         <span style={{ color, fontSize: 12 }}>{meta.icon}</span>{data.name}
       </div>
       <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 3 }}>{data.technology || data.type}</div>
+      {data.multiAz && <div style={{ color: '#93c5fd', fontSize: 10.5, marginTop: 3 }}>Multi-AZ</div>}
       {data.warning && <div style={{ color: '#f5a524', fontSize: 10.5, marginTop: 3 }}>⚠ {data.warning}</div>}
       {data.sharedViews && <span data-testid="aa-node-shared" title={`다른 View에도 있는 컴포넌트 (${data.sharedViews}곳)`} aria-label={`참조 노드 · ${data.sharedViews}개 View`}
         style={{ position: 'absolute', right: 6, bottom: 4, fontSize: 11, color: '#c8a96e' }}>⧉</span>}

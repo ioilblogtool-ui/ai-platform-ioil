@@ -43,7 +43,7 @@ const nodeTypes = { component: ComponentNode, group: GroupNode, note: NoteNode, 
 const edgeTypes = { relation: RelationEdge };
 const MODEL_WARN_BYTES = 900 * 1024;
 // 팔레트 묶음 순서. View 종류에 맞지 않는 묶음은 항목이 없어 숨겨진다 (Sprint 7: deployment 추가)
-const CATEGORY_ORDER = ['deployment', 'application', 'data', 'general'];
+const CATEGORY_ORDER = ['deployment', 'aws', 'kubernetes', 'application', 'data', 'general'];
 // 새 노드를 놓을 때 커서가 노드 가운데쯤 오도록 (컴포넌트 168×56, 그룹 360×240, 노트 200×64)
 const DROP_OFFSET: Record<string, { x: number; y: number }> = { component: { x: 84, y: 28 }, group: { x: 180, y: 120 }, note: { x: 100, y: 32 } };
 
@@ -340,6 +340,11 @@ function Studio({ projectId }: { projectId: string }) {
         </div>
       )}
 
+      {s.detachedClustersOnLoad > 0 && (
+        <div role="status" style={{ padding: '6px 14px', color: '#f3c97a' }}>
+          끊긴 EKS 연결 {s.detachedClustersOnLoad}개를 해제했습니다. K8s View와 워크로드는 그대로입니다.
+        </div>
+      )}
       {s.backupMessage && <div role="status" style={{ padding: '6px 14px', color: '#f3c97a' }}>{s.backupMessage}</div>}
       {s.recovery && (
         <div role="dialog" aria-label="미저장 편집 복구" style={{ padding: '8px 14px', color: '#f3c97a' }}>
@@ -518,11 +523,12 @@ function DeleteDialog() {
           {p.otherViewCount > 0 && <><b style={{ color: '#f5a524' }}>다른 View {p.otherViewCount}곳에서도 사라집니다.</b><br /></>}
           {p.flowCount > 0 && <>API Flow {p.flowCount}개의 참여에서 빠집니다(본문은 고쳐야 한다고 표시됩니다).<br /></>}
           {p.flowsUnderTwo.length > 0 && <b style={{ color: '#ff9b9d' }} data-testid="aa-delete-flows-under-two">참여가 2개 미만이 되는 흐름 {p.flowsUnderTwo.length}개({p.flowsUnderTwo.join(', ')})는 함께 삭제됩니다.<br /></b>}
-          “노드만 제거”는 화면에서만 지우고 컴포넌트·관계는 남깁니다 (저장 시 경고).
+          {p.detachedClusters > 0 && <>K8s View {p.detachedClusters}개의 연결이 해제됩니다. 워크로드는 보존됩니다.<br /></>}
+          {!p.includesEks && <>“노드만 제거”는 화면에서만 지우고 컴포넌트·관계는 남깁니다 (저장 시 경고).</>}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
           <button style={btn()} onClick={cancelDelete}>취소</button>
-          <button style={btn()} onClick={() => confirmDelete('nodes')} data-testid="aa-delete-nodes">노드만 제거</button>
+          {!p.includesEks && <button style={btn()} onClick={() => confirmDelete('nodes')} data-testid="aa-delete-nodes">노드만 제거</button>}
           <button autoFocus style={{ ...btn(), background: '#e5484d', borderColor: '#e5484d', color: '#fff', fontWeight: 600 }} onClick={() => confirmDelete('components')} data-testid="aa-delete-components">{p.flowsUnderTwo.length ? '컴포넌트·흐름 함께 삭제' : '컴포넌트 삭제'}</button>
         </div>
       </div>

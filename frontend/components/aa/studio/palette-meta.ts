@@ -8,6 +8,8 @@ export const CATEGORY_COLOR: Record<string, string> = {
   networking: '#a78bfa',
   general: 'rgba(255,255,255,0.4)',
   deployment: '#5ec4b6',
+  aws: '#ffb547',
+  kubernetes: '#82aaff',
 };
 
 // 배치안 신뢰 구역 색 (04 §6.10: external 회색 · dmz 보라 · internal teal · data 파랑)
@@ -27,6 +29,18 @@ export const TYPE_FALLBACK: Record<string, { icon: string; category: string }> =
   storage: { icon: '▥', category: 'data' },
   group: { icon: '⬚', category: 'general' },
   note: { icon: '✎', category: 'general' },
+  'aws.region': { icon: '◎', category: 'aws' },
+  'aws.vpc': { icon: '⬚', category: 'aws' },
+  'aws.az': { icon: '▥', category: 'aws' },
+  'aws.subnet': { icon: '▦', category: 'aws' },
+  'aws.alb': { icon: '⇋', category: 'aws' },
+  'aws.eks': { icon: '⬡', category: 'aws' },
+  'aws.rds': { icon: '⛁', category: 'aws' },
+  'k8s.namespace': { icon: '⬚', category: 'kubernetes' },
+  'k8s.deployment': { icon: '⬡', category: 'kubernetes' },
+  'k8s.service': { icon: '⇋', category: 'kubernetes' },
+  'k8s.ingress': { icon: '⇲', category: 'kubernetes' },
+  'k8s.hpa': { icon: '↗', category: 'kubernetes' },
   // Sprint 7 배치안 (레지스트리 v3와 같은 아이콘)
   'dep.environment': { icon: '▣', category: 'deployment' },
   'dep.zone': { icon: '▦', category: 'deployment' },
@@ -54,7 +68,8 @@ export function paletteItems(registry: TypeRegistry | null, viewKind: string, qu
   if (!registry) {
     for (const [type, f] of Object.entries(TYPE_FALLBACK)) {
       // 레지스트리가 없을 때: 배치안 타입은 배치안에서만, 나머지는 Logical에서만
-      if (type.startsWith('dep.') !== (viewKind === 'deployment') && type !== 'group' && type !== 'note') continue;
+      const view = f.category === 'aws' || f.category === 'kubernetes' || f.category === 'deployment' ? f.category : 'logical';
+      if (view !== viewKind && type !== 'group' && type !== 'note') continue;
       if (!q || type.includes(q)) out.push({ type, label: type, icon: f.icon, category: f.category, nodeKind: type === 'group' || type === 'note' ? type : 'component' });
     }
     return out;
@@ -63,7 +78,7 @@ export function paletteItems(registry: TypeRegistry | null, viewKind: string, qu
     if (!d.views.includes(viewKind as never)) continue;
     const hay = [d.label, type, ...(d.aliases ?? [])].map((s) => s.toLowerCase());
     if (q && !hay.some((s) => s.includes(q))) continue;
-    out.push({ type, label: d.label, icon: d.icon || TYPE_FALLBACK[type]?.icon || '▭', category: d.category, nodeKind: d.nodeKind });
+    out.push({ type, label: d.label, icon: (viewKind === 'aws' || viewKind === 'kubernetes' ? TYPE_FALLBACK[type]?.icon : undefined) || d.icon || TYPE_FALLBACK[type]?.icon || '▭', category: d.category, nodeKind: d.nodeKind });
   }
   return out;
 }

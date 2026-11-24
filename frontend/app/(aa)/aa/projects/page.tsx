@@ -68,7 +68,7 @@ export default function AaProjectsPage() {
           padding: '8px 11px', color: 'rgba(255,255,255,0.9)', fontSize: 13, outline: 'none',
         }} />
 
-        <Card style={{ padding: 0, overflow: 'hidden' }}>
+        <Card style={{ padding: 0, overflow: 'visible' }}>
           {error && <div role="alert" style={{ padding: 16, color: '#f87171', fontSize: 13 }}>{error}</div>}
           {!error && projects === null && <div style={{ padding: 16, color: '#5a5870', fontSize: 13 }}>불러오는 중…</div>}
           {!error && projects?.length === 0 && (

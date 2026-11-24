@@ -20,6 +20,7 @@ const fields: React.CSSProperties = { display: 'grid', gap: 10, marginTop: 12 };
 
 export default function PropertyInspector({ edits }: { edits: InspectorEdits }) {
   const s = useStudio();
+  const [clusterError, setClusterError] = useState<{ id: string; message: string } | null>(null);
   const view = s.model?.views.find((entry) => entry.id === s.viewId);
   const total = s.selectedNodeIds.length + s.selectedEdgeIds.length;
   const node = total === 1 ? view?.nodes.find((entry) => entry.id === s.selectedNodeIds[0]) : undefined;
@@ -27,6 +28,10 @@ export default function PropertyInspector({ edits }: { edits: InspectorEdits }) 
   const component = node?.componentId ? s.model?.components[node.componentId] : undefined;
   const relation = edge ? s.model?.relations[edge.relationId] : undefined;
 
+  const infraEnabled = process.env.NEXT_PUBLIC_AA_INFRA_VIEWS !== 'false';
+  const workloads = infraEnabled && component?.type === 'aws.eks'
+    ? s.model?.views.find((v) => v.kind === 'kubernetes' && v.clusterRef === component.id)
+    : undefined;
   let body: React.ReactNode;
   if (total > 1) {
     body = <>
@@ -39,9 +44,18 @@ export default function PropertyInspector({ edits }: { edits: InspectorEdits }) 
       <strong>{definition?.label ?? component.type}</strong>
       <div style={mono}>{component.id}</div>
       <div style={muted}>위치 ({node.position.x}, {node.position.y}){node.parentId ? ' · 그룹 안 상대 좌표' : ''}</div>
-      {s.placementWarnings.some((w) => w.viewId === s.viewId && w.nodeId === node.id) && (
-        <div role="status" data-testid="aa-inspector-v11" style={{ ...muted, color: '#f5a524' }}>⚠ Process는 VM 또는 Platform 안에 두세요 (V11, 저장은 됨).</div>
+      {s.placementWarnings.filter((w) => w.viewId === s.viewId && w.nodeId === node.id).map((w) => (
+        <div key={w.message} role="status" data-testid={`aa-inspector-${w.rule.toLowerCase()}`} style={{ ...muted, color: '#f5a524' }}>⚠ {w.message}</div>
+      ))}
+      {workloads && <button style={button} onClick={() => { edits.flush(); s.setView(workloads.id); }}>K8s 워크로드 보기 ▸</button>}
+      {infraEnabled && component.type === 'aws.eks' && !workloads && (
+        <button style={button} disabled={Boolean(s.recovery) || s.importing || s.reloading}
+          onClick={() => { edits.flush(); const message = s.createKubernetesForEks(component.id); setClusterError(message ? { id: component.id, message } : null); }}>
+          K8s View 만들기
+        </button>
       )}
+      {clusterError?.id === component.id && <div role="alert">{clusterError.message}</div>}
+      {component.type === 'aws.rds' && component.properties?.multiAz === true && <div style={muted}>Multi-AZ</div>}
       {definition?.realizes && <RealizesEditor componentId={component.id} />}
       {component.layer === 'logical' && <RunLocations componentId={component.id} />}
       <Placements componentId={component.id} />
@@ -332,8 +346,9 @@ function RealizesEditor({ componentId }: { componentId: string }) {
 /** Logical 컴포넌트가 배치안마다 어디서 실행되는지 — 누르면 그 배치안의 구현체로 이동 */
 function RunLocations({ componentId }: { componentId: string }) {
   const s = useStudio();
-  if (!s.model || !s.model.views.some((v) => v.kind === 'deployment')) return null;
-  const rows = runLocations(s.model, componentId);
+  if (!s.model || !s.model.views.some((v) => v.kind === 'deployment' || (process.env.NEXT_PUBLIC_AA_INFRA_VIEWS !== 'false' && ['aws', 'kubernetes'].includes(v.kind)))) return null;
+  const rows = runLocations(s.model, componentId).filter((row) =>
+    process.env.NEXT_PUBLIC_AA_INFRA_VIEWS !== 'false' || s.model?.views.some((v) => v.id === row.viewId && v.kind === 'deployment'));
   return (
     <div style={{ ...fields, marginTop: 12 }} data-testid="aa-run-locations">
       <strong>배치안별 실행 위치</strong>

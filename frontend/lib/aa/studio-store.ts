@@ -20,6 +20,8 @@ type Point = { x: number; y: number };
 
 /** 확인이 필요한 삭제 (컴포넌트가 포함된 경우). 그룹·노트·엣지만이면 바로 삭제한다 */
 export type PendingDelete = {
+  includesEks: boolean;
+  detachedClusters: number;
   nodeIds: string[]; edgeIds: string[]; componentCount: number; relationCount: number; otherViewCount: number;
   /** Sprint 8: 흐름에서 빠지는 수, 참여 부족으로 함께 지워질 흐름 이름 */
   flowCount: number; flowsUnderTwo: string[];
@@ -57,6 +59,7 @@ type StudioState = {
   highlightFlowId: string | null;
   /** 로드 시 정리한 흐름 참조 (Q12) — removed: 뺀 참여·역할 수, underTwo: 유효 참여가 2개 미만인 흐름 */
   flowRepair: { removed: number; underTwo: string[] } | null;
+  detachedClustersOnLoad: number;
 
   backupMessage: string | null;
   recovery: ReturnType<typeof readDraftBackup>;
@@ -107,10 +110,12 @@ type StudioState = {
   /** 다른 View의 노드로 이동해 선택 (realizes 왕복) */
   focusNode: (viewId: string, nodeId: string) => void;
   /** 오류 문구를 돌려준다 (성공이면 null) */
-  addDeploymentView: (variant: string) => string | null;
+  addDeploymentView: (variant: string, kind?: ops.InfrastructureViewKind) => string | null;
   duplicateDeploymentView: (variant: string) => string | null;
   renameDeploymentView: (variant: string) => string | null;
   removeDeploymentView: (viewId: string) => void;
+  createKubernetesForEks: (clusterId: string) => string | null;
+  setClusterRef: (clusterId?: string) => void;
   setStrategy: (strategyMd: string) => void;
   setRealizes: (fromId: string, toId: string, on: boolean) => void;
   loadRequirements: () => Promise<void>;
@@ -231,7 +236,7 @@ export const useStudio = create<StudioState>((set, get) => {
         conflictRevision: null,
         saveState: edited ? 'dirty' : 'saved',
         saveMessage: res.warnings.length ? `경고 ${res.warnings.length}건` : null,
-          placementWarnings: res.warnings.filter((w) => w.rule === 'V11'),
+          placementWarnings: res.warnings.filter((w) => w.rule === 'V11' || w.rule === 'V16'),
       });
       if (edited) {
         backup();
@@ -403,9 +408,9 @@ export const useStudio = create<StudioState>((set, get) => {
       set({ viewId, selectedNodeIds: [nodeId], selectedEdgeIds: [], pendingDelete: null, focusNodeId: nodeId });
     },
 
-    addDeploymentView(variant) {
+    addDeploymentView(variant, kind) {
       let r: ReturnType<typeof ops.addDeploymentView> | null = null;
-      edit((m) => { r = ops.addDeploymentView(m, variant, newId); return r.model; });
+      edit((m) => { r = kind ? ops.addInfrastructureView(m, kind, variant, newId) : ops.addDeploymentView(m, variant, newId); return r.model; });
       const res = r as ReturnType<typeof ops.addDeploymentView> | null;
       if (res?.viewId) set({ viewId: res.viewId, selectedNodeIds: [], selectedEdgeIds: [], focusNodeId: null });
       return res?.error ?? null;
@@ -414,7 +419,8 @@ export const useStudio = create<StudioState>((set, get) => {
     duplicateDeploymentView(variant) {
       const { model, viewId } = get();
       if (!model) return '설계를 불러오지 못했습니다.';
-      const r = ops.duplicateDeploymentView(model, viewId, variant, newId);
+      const duplicate = model.views.find((v) => v.id === viewId)?.kind === 'aws' ? ops.duplicateAwsView : ops.duplicateDeploymentView;
+      const r = duplicate(model, viewId, variant, newId);
       if (r.error || !r.viewId) return r.error ?? '복제하지 못했습니다.';
       // V8: 복제로 모델이 한도를 넘으면 막는다
       if (modelByteSize(r.model) > IMPORT_MAX_BYTES || Object.keys(r.model.components).length > IMPORT_MAX_COMPONENTS) {
@@ -432,13 +438,37 @@ export const useStudio = create<StudioState>((set, get) => {
     },
 
     removeDeploymentView(target) {
-      const changed = edit((m) => ops.removeDeploymentView(m, target));
+      const kind = get().model?.views.find((v) => v.id === target)?.kind;
+      const remove = kind === 'aws' ? ops.removeAwsView : kind === 'kubernetes' ? ops.removeKubernetesView : ops.removeDeploymentView;
+      const changed = edit((m) => remove(m, target));
       if (!changed) return;
       const { model, viewId } = get();
       if (viewId === target) {
-        const next = model ? ops.deploymentViews(model)[0]?.id ?? 'view_logical' : 'view_logical';
+        const next = model?.views.find((v) => v.kind === kind)?.id ?? 'view_logical';
         set({ viewId: next, selectedNodeIds: [], selectedEdgeIds: [], focusNodeId: null });
       }
+    },
+
+    createKubernetesForEks(clusterId) {
+      const model = get().model;
+      const cluster = model && ops.eksPlacements(model).find((p) => p.componentId === clusterId);
+      if (!model || !cluster) return 'AWS View에서 EKS를 찾을 수 없습니다.';
+      const existing = model.views.find((v) => v.kind === 'kubernetes' && v.clusterRef === clusterId);
+      if (existing) { get().setView(existing.id); return null; }
+      const names = new Set(model.views.filter((v) => v.kind === 'kubernetes').map((v) => v.variant));
+      const base = cluster.name.trim().slice(0, 54) || 'K8s';
+      let name = base;
+      for (let suffix = 2; names.has(name); suffix++) name = `${base} ${suffix}`;
+      const created = ops.addInfrastructureView(model, 'kubernetes', name, newId);
+      if (!created.viewId) return created.error ?? 'K8s View를 만들지 못했습니다.';
+      const linked = ops.setClusterRef(created.model, created.viewId, clusterId);
+      if (linked === created.model) return 'EKS에 연결하지 못했습니다.';
+      if (edit(() => linked)) get().setView(created.viewId);
+      return null;
+    },
+
+    setClusterRef(clusterId) {
+      edit((model, viewId) => ops.setClusterRef(model, viewId, clusterId));
     },
 
     setStrategy(strategyMd) {
@@ -465,6 +495,7 @@ export const useStudio = create<StudioState>((set, get) => {
     selectedFlowId: null,
     highlightFlowId: null,
     flowRepair: null,
+    detachedClustersOnLoad: 0,
 
     backupMessage: null,
     recovery: null,
@@ -487,7 +518,7 @@ export const useStudio = create<StudioState>((set, get) => {
       set({
         projectId, saveState: 'loading', loadError: null, model: null, past: [], future: [],
         selectedNodeIds: [], selectedEdgeIds: [], pendingDelete: null,
-        panel: 'canvas', selectedFlowId: null, highlightFlowId: null, flowRepair: null,
+        panel: 'canvas', selectedFlowId: null, highlightFlowId: null, flowRepair: null, detachedClustersOnLoad: 0,
         conflictRevision: null, saveMessage: null, backupMessage: null, recovery: null, reloading: false,
         requirements: [], requirementsError: null, importing: false, importUndo: null,
       });
@@ -512,15 +543,17 @@ export const useStudio = create<StudioState>((set, get) => {
         }
         // Sprint 8 (Q12): 끊긴 흐름 참여·역할 정리. 참여가 2개 미만인 흐름은 지우지 않고 안내만
         const repaired = flowOps.repairFlows(draft.model);
+        const clusters = ops.repairClusterRefs(repaired.model);
         committedModel = draft.model;
         set({
+          detachedClustersOnLoad: recovery ? 0 : clusters.detached,
           flowRepair: repaired.removed || repaired.underTwo.length ? { removed: repaired.removed, underTwo: repaired.underTwo } : null,
           projectName: project.name, model: draft.model, baseRevision: draft.revision, baseVersion: draft.baseVersion,
-          viewId: 'view_logical', placementWarnings: (draft.warnings ?? []).filter((w) => w.rule === 'V11'), focusNodeId: null,
+          viewId: 'view_logical', placementWarnings: (draft.warnings ?? []).filter((w) => w.rule === 'V11' || w.rule === 'V16'), focusNodeId: null,
           registry, saveState: 'saved', editSeq: 0, recovery, backupMessage,
         });
         void get().loadRequirements();
-        if (repaired.model !== draft.model && !recovery) { set({ model: repaired.model }); commitEdit(); }
+        if (clusters.model !== draft.model && !recovery) { set({ model: clusters.model }); commitEdit(); }
       } catch (error) {
         if (session !== currentSession) return;
         const message = error instanceof AaApiError && error.code === 'NOT_FOUND'
@@ -534,8 +567,9 @@ export const useStudio = create<StudioState>((set, get) => {
       if (!recovery) return;
       ownedBackup = recovery.raw;
       const older = recovery.value.revision < baseRevision;
+      const clusters = ops.repairClusterRefs(recovery.value.model);
       set({
-        model: recovery.value.model, past: [], future: [], importUndo: null,
+        model: clusters.model, detachedClustersOnLoad: clusters.detached, past: [], future: [], importUndo: null,
         recovery: null,
         saveState: older ? 'conflict' : 'dirty',
         conflictRevision: older ? baseRevision : null,
@@ -547,7 +581,10 @@ export const useStudio = create<StudioState>((set, get) => {
       const { recovery } = get();
       if (!recovery) return;
       clearBackup(recovery.raw);
-      set({ recovery: null });
+      const model = get().model;
+      const repaired = model ? ops.repairClusterRefs(model) : null;
+      set({ recovery: null, ...(repaired && { model: repaired.model, detachedClustersOnLoad: repaired.detached }) });
+      if (repaired?.detached) commitEdit();
     },
 
     async reloadServer() {
@@ -562,13 +599,16 @@ export const useStudio = create<StudioState>((set, get) => {
         committedModel = draft.model;
         changedDuringGesture = false;
         pausedForAuth = false;
+        const clusters = ops.repairClusterRefs(draft.model);
         set({
-          model: draft.model, baseRevision: draft.revision, baseVersion: draft.baseVersion, saveState: 'saved',
+          detachedClustersOnLoad: clusters.detached,
+          model: clusters.model, baseRevision: draft.revision, baseVersion: draft.baseVersion, saveState: 'saved',
           viewId: draft.model.views.some((v) => v.id === get().viewId) ? get().viewId : 'view_logical',
-          placementWarnings: (draft.warnings ?? []).filter((w) => w.rule === 'V11'),
+          placementWarnings: (draft.warnings ?? []).filter((w) => w.rule === 'V11' || w.rule === 'V16'),
           conflictRevision: null, reloading: false, selectedNodeIds: [], selectedEdgeIds: [],
           pendingDelete: null, editSeq: 0, past: [], future: [], importUndo: null,
         });
+        if (clusters.detached) commitEdit();
       } catch (error) {
         if (session !== currentSession) return;
         set({ reloading: false, saveMessage: (error as Error).message });
@@ -668,7 +708,7 @@ export const useStudio = create<StudioState>((set, get) => {
       if (!n.length && !e.length) return;
       const summary = ops.deleteSummary(model, viewId, n);
       if (summary.needsConfirm) {
-        set({ pendingDelete: { nodeIds: n, edgeIds: e, componentCount: summary.componentCount, relationCount: summary.relationCount, otherViewCount: summary.otherViewCount, flowCount: summary.flowCount, flowsUnderTwo: summary.flowsUnderTwo } });
+        set({ pendingDelete: { ...summary, nodeIds: n, edgeIds: e } });
       } else {
         runDelete(n, e, true);   // 그룹·노트·엣지만 — 컴포넌트가 없으므로 deleteComponents는 의미 없음
       }
@@ -817,7 +857,7 @@ export const useStudio = create<StudioState>((set, get) => {
         set({
           model: built.model, baseRevision: res.revision, saveState: 'saved', conflictRevision: null,
           saveMessage: res.warnings.length ? `경고 ${res.warnings.length}건` : null,
-          placementWarnings: res.warnings.filter((w) => w.rule === 'V11'),
+          placementWarnings: res.warnings.filter((w) => w.rule === 'V11' || w.rule === 'V16'),
           past: appendHistory(state.past, latest), future: [],
           importUndo: { model: latest, revision: res.revision, summary: built.summary },
           selectedNodeIds: [], selectedEdgeIds: [],

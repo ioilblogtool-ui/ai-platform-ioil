@@ -10,6 +10,7 @@ export type ComponentNodeData = {
   name: string;
   type: string;
   technology?: string;
+  multiAz?: boolean;
   /** V11 경고 (Sprint 7): 배치안의 Process가 VM·Platform 밖에 있음 */
   warning?: string;
   /** Sprint 8 (VIEW-05): 이 컴포넌트가 놓인 View 수가 2 이상이면 그 수 (⧉ 표시) */
@@ -18,7 +19,7 @@ export type ComponentNodeData = {
   dimmed?: boolean;
 };
 /** 배치안의 컨테이너 컴포넌트(환경·구역·플랫폼·VM) — 크기를 가진 component 노드 (Sprint 7) */
-export type ContainerNodeData = ComponentNodeData & { trust?: string; summary?: string };
+export type ContainerNodeData = ComponentNodeData & { trust?: string; tier?: string; summary?: string };
 export type GroupNodeData = { label: string };
 export type NoteNodeData = { text: string };
 
@@ -95,11 +96,11 @@ export function toFlow(
       if (!c) continue;
       const shared = viewCount.get(c.id) ?? 0;
       const dim = highlight && !highlight.componentIds.has(c.id) ? { dimmed: true } : {};
-      const data = { componentId: c.id, name: c.name, type: c.type, technology: c.technology, ...(warnings.has(n.id) ? { warning: warnings.get(n.id) } : {}), ...(shared > 1 ? { sharedViews: shared } : {}), ...dim };
+      const data = { componentId: c.id, name: c.name, type: c.type, technology: c.technology, ...(c.type === 'aws.rds' && c.properties?.multiAz === true ? { multiAz: true } : {}), ...(warnings.has(n.id) ? { warning: warnings.get(n.id) } : {}), ...(shared > 1 ? { sharedViews: shared } : {}), ...dim };
       if (isBox(n)) {
         const trust = typeof c.properties?.trust === 'string' ? (c.properties.trust as string) : undefined;
         nodes.push({
-          ...base, type: 'container', data: { ...data, ...(trust ? { trust } : {}) },
+          ...base, type: 'container', data: { ...data, ...(trust ? { trust } : {}), tier: typeof c.properties?.tier === 'string' ? c.properties.tier : undefined },
           width: n.width, height: n.height,
           style: { width: n.width, height: n.height, padding: 0, background: 'transparent', borderStyle: 'none', borderRadius: 10, boxShadow: 'none' },
         });

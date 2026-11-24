@@ -240,7 +240,7 @@ export function isSelfOrDescendant(view: View, candidateId: string, ancestorId: 
  */
 export function canContain(model: ArchitectureModel, view: View, node: ViewNode, registry?: TypeRegistry | null): boolean {
   if (node.kind === 'group') return true;
-  if (view.kind !== 'deployment' || node.kind !== 'component' || !node.componentId) return false;
+  if (!['deployment', 'aws', 'kubernetes'].includes(view.kind) || node.kind !== 'component' || !node.componentId) return false;
   const type = model.components[node.componentId]?.type;
   return Boolean(type && registry?.types[type]?.container);
 }
@@ -301,7 +301,7 @@ export function referenceCandidates(model: ArchitectureModel, viewId: string, re
   const here = new Set(view.nodes.map((n) => n.componentId).filter(Boolean));
   const out: ReferenceCandidate[] = [];
   for (const c of Object.values(model.components)) {
-    if (here.has(c.id)) continue;
+    if (here.has(c.id) || c.type === 'aws.eks') continue;
     const allowed = registry?.types[c.type]?.views;
     if (!allowed || !allowed.includes(view.kind)) continue;
     const views = model.views.filter((v) => v.nodes.some((n) => n.componentId === c.id)).map((v) => ({ id: v.id, label: viewLabel(v) }));
@@ -316,7 +316,7 @@ export function addReferenceNode(
 ): { model: ArchitectureModel; nodeId: string | null } {
   const c = model.components[componentId];
   const view = getView(model, viewId);
-  if (!c || !view || view.nodes.some((n) => n.componentId === componentId)) return { model, nodeId: null };
+  if (!c || c.type === 'aws.eks' || !view || view.nodes.some((n) => n.componentId === componentId)) return { model, nodeId: null };
   const def = registry?.types[c.type];
   if (!def?.views?.includes(view.kind)) return { model, nodeId: null };
   let nodeId: string | null = null;
@@ -461,6 +461,9 @@ function pruneEdges(m: ArchitectureModel, v: View) {
 
 function deleteComponent(m: ArchitectureModel, componentId: string) {
   delete m.components[componentId];
+  for (const view of m.views) {
+    if (view.clusterRef === componentId) delete view.clusterRef;
+  }
   // Sprint 8 (Q6): 흐름의 참여·인증 역할에서 뺀다. 참여가 2개 미만이 되는 흐름은 함께 지운다
   // (확인 창이 [취소]/[흐름도 함께 삭제]만 주므로 여기 왔으면 사용자가 동의함). 본문 참조는 그대로 — 화면이 불일치로 알린다
   for (const [fid, fl] of Object.entries(m.flows ?? {})) {
@@ -491,7 +494,10 @@ export function removeNodes(
   model: ArchitectureModel, viewId: string, nodeIds: string[], opts: { deleteComponents: boolean },
 ): ArchitectureModel {
   return withView(model, viewId, (m, v) => {
-    const removed = dropNodes(v, new Set(nodeIds));
+    const requested = new Set(nodeIds);
+    if (!opts.deleteComponents && v.nodes.some((node) => requested.has(node.id)
+      && node.componentId && m.components[node.componentId]?.type === 'aws.eks')) return false;
+    const removed = dropNodes(v, requested);
     if (!removed.length) return false;
     if (opts.deleteComponents) {
       const cids = new Set(removed.map((n) => n.componentId).filter((cid): cid is string => Boolean(cid && m.components[cid])));
@@ -565,6 +571,8 @@ export function deleteSummary(model: ArchitectureModel, viewId: string, nodeIds:
     otherViewCount,
     flowCount: flows.length,
     flowsUnderTwo,
+    includesEks: componentIds.some((id) => model.components[id]?.type === 'aws.eks'),
+    detachedClusters: model.views.filter((view) => view.kind === 'kubernetes' && view.clusterRef && cset.has(view.clusterRef)).length,
     needsConfirm: componentIds.length > 0,   // 그룹·노트만이면 묻지 않음
   };
 }
@@ -782,9 +790,13 @@ export const deploymentViews = (model: ArchitectureModel) => model.views.filter(
 
 /** 배치안 이름 검사. 문제가 없으면 undefined */
 export function variantError(model: ArchitectureModel, name: string, exceptViewId?: string): string | undefined {
+  return variantErrorFor(deploymentViews(model), name, exceptViewId);
+}
+
+function variantErrorFor(views: View[], name: string, exceptViewId?: string): string | undefined {
   const n = name.trim();
   if (!n || n.length > VARIANT_MAX) return `배치안 이름은 1~${VARIANT_MAX}자여야 합니다.`;
-  if (deploymentViews(model).some((v) => v.id !== exceptViewId && (v.variant ?? '').trim() === n)) return '같은 이름의 배치안이 있습니다.';
+  if (views.some((v) => v.id !== exceptViewId && (v.variant ?? '').trim() === n)) return '같은 이름의 배치안이 있습니다.';
   return undefined;
 }
 
@@ -801,10 +813,23 @@ export function addDeploymentView(model: ArchitectureModel, variant: string, new
   return { model: next, viewId };
 }
 
+export type InfrastructureViewKind = 'aws' | 'kubernetes';
+
+export function addInfrastructureView(model: ArchitectureModel, kind: InfrastructureViewKind, variant: string, newId: NewId): ReturnType<typeof addDeploymentView> {
+  const views = model.views.filter((v) => v.kind === kind);
+  const limit = kind === 'aws' ? 3 : 5;
+  const error = views.length >= limit ? `View는 최대 ${limit}개입니다.` : variantErrorFor(views, variant);
+  if (error) return { model, viewId: null, error };
+  const next = cloneModel(model);
+  const viewId = newId('view').replace(/^view_/, kind === 'aws' ? 'view_aws_' : 'view_k8s_');
+  next.views.push({ id: viewId, kind, name: kind === 'aws' ? 'AWS' : 'Kubernetes', variant: variant.trim(), nodes: [], edges: [] });
+  return { model: next, viewId };
+}
+
 export function renameDeploymentView(model: ArchitectureModel, viewId: string, variant: string): { model: ArchitectureModel; error?: string } {
   const v = getView(model, viewId);
-  if (!v || v.kind !== 'deployment') return { model, error: '배치안을 찾을 수 없습니다.' };
-  const error = variantError(model, variant, viewId);
+  if (!v || !['deployment', 'aws', 'kubernetes'].includes(v.kind)) return { model, error: 'View를 찾을 수 없습니다.' };
+  const error = variantErrorFor(model.views.filter((view) => view.kind === v.kind), variant, viewId);
   if (error) return { model, error };
   if (v.variant === variant.trim()) return { model };
   return { model: withView(model, viewId, (_m, vv) => { vv.variant = variant.trim(); }) };
@@ -823,7 +848,7 @@ function ownComponents(model: ArchitectureModel, viewId: string): Set<string> {
   const ids = new Set<string>();
   for (const n of v.nodes) {
     const c = n.componentId ? model.components[n.componentId] : undefined;
-    if (!c || c.layer !== 'deployment') continue;
+    if (!c || c.layer !== v.kind) continue;
     if (model.views.some((o) => o.id !== viewId && o.nodes.some((x) => x.componentId === c.id))) continue;
     ids.add(c.id);
   }
@@ -834,17 +859,27 @@ function ownComponents(model: ArchitectureModel, viewId: string): Set<string> {
  * 배치안 복제: deployment 컴포넌트·노드·관계·엣지를 새 id로 복사하고 parentId·관계 끝점을 다시 연결한다.
  * Logical 컴포넌트(realizes의 대상)는 공유. 결과 모델 크기는 호출 쪽이 V8로 검사한다(modelByteSize).
  */
-export function duplicateDeploymentView(model: ArchitectureModel, viewId: string, variant: string, newId: NewId): { model: ArchitectureModel; viewId: string | null; error?: string } {
+export function duplicateDeploymentView(model: ArchitectureModel, viewId: string, variant: string, newId: NewId) {
+  return duplicatePlacementView(model, viewId, variant, newId, 'deployment');
+}
+
+export function duplicateAwsView(model: ArchitectureModel, viewId: string, variant: string, newId: NewId) {
+  return duplicatePlacementView(model, viewId, variant, newId, 'aws');
+}
+
+function duplicatePlacementView(model: ArchitectureModel, viewId: string, variant: string, newId: NewId, kind: 'deployment' | 'aws'): { model: ArchitectureModel; viewId: string | null; error?: string } {
   const src = getView(model, viewId);
-  if (!src || src.kind !== 'deployment') return { model, viewId: null, error: '배치안을 찾을 수 없습니다.' };
-  if (deploymentViews(model).length >= MAX_DEPLOYMENT_VIEWS) return { model, viewId: null, error: `배치안은 최대 ${MAX_DEPLOYMENT_VIEWS}개입니다.` };
-  const error = variantError(model, variant);
+  if (!src || src.kind !== kind) return { model, viewId: null, error: '배치안을 찾을 수 없습니다.' };
+  const maxViews = kind === 'aws' ? 3 : MAX_DEPLOYMENT_VIEWS;
+  const views = model.views.filter((view) => view.kind === kind);
+  if (views.length >= maxViews) return { model, viewId: null, error: `배치안은 최대 ${maxViews}개입니다.` };
+  const error = variantErrorFor(views, variant);
   if (error) return { model, viewId: null, error };
   const next = cloneModel(model);
   const compMap = new Map<string, string>();
   for (const n of src.nodes) {
     const c = n.componentId ? next.components[n.componentId] : undefined;
-    if (!c || c.layer !== 'deployment' || compMap.has(c.id)) continue;
+    if (!c || c.layer !== src.kind || compMap.has(c.id)) continue;
     const copy = structuredClone(c);
     copy.id = newId('cmp');
     next.components[copy.id] = copy;
@@ -864,9 +899,9 @@ export function duplicateDeploymentView(model: ArchitectureModel, viewId: string
     relMap.set(r.id, copy.id);
   }
   const nodeMap = new Map(src.nodes.map((n) => [n.id, newId('nd')]));
-  const newViewIdValue = newViewId(newId);
+  const newViewIdValue = src.kind === 'aws' ? newId('view').replace(/^view_/, 'view_aws_') : newViewId(newId);
   next.views.push({
-    id: newViewIdValue, kind: 'deployment', name: src.name, variant: variant.trim(),
+    id: newViewIdValue, kind: src.kind, name: src.name, variant: variant.trim(),
     ...(src.strategyMd ? { strategyMd: src.strategyMd } : {}),
     nodes: src.nodes.map((n) => {
       const copy: ViewNode = structuredClone(n);
@@ -882,8 +917,20 @@ export function duplicateDeploymentView(model: ArchitectureModel, viewId: string
 
 /** 배치안 삭제: View와, 다른 View에서 쓰지 않는 deployment 컴포넌트·그 관계(realizes 포함)를 지운다 */
 export function removeDeploymentView(model: ArchitectureModel, viewId: string): ArchitectureModel {
+  return removePlacementView(model, viewId, 'deployment');
+}
+
+export function removeAwsView(model: ArchitectureModel, viewId: string): ArchitectureModel {
+  return removePlacementView(model, viewId, 'aws');
+}
+
+export function removeKubernetesView(model: ArchitectureModel, viewId: string): ArchitectureModel {
+  return removePlacementView(model, viewId, 'kubernetes');
+}
+
+function removePlacementView(model: ArchitectureModel, viewId: string, kind: 'deployment' | 'aws' | 'kubernetes'): ArchitectureModel {
   const v = getView(model, viewId);
-  if (!v || v.kind !== 'deployment') return model;
+  if (!v || v.kind !== kind) return model;
   const own = ownComponents(model, viewId);
   const next = cloneModel(model);
   next.views = next.views.filter((x) => x.id !== viewId);
@@ -933,13 +980,57 @@ export function setRealizes(model: ArchitectureModel, registry: TypeRegistry | n
 export const realizesTargets = (model: ArchitectureModel, componentId: string) =>
   Object.values(model.relations).filter((r) => r.type === 'realizes' && r.from === componentId).map((r) => r.to);
 
+export function eksPlacements(model: ArchitectureModel) {
+  return model.views.flatMap((view) => view.kind !== 'aws' ? [] : view.nodes.flatMap((node) => {
+    const c = node.componentId ? model.components[node.componentId] : undefined;
+    return c?.type === 'aws.eks' ? [{
+      componentId: c.id, name: c.name, viewId: view.id, nodeId: node.id, variant: view.variant ?? view.name,
+    }] : [];
+  }));
+}
+
+/** Draft 복구용. 발행 버전 조회에서는 원본 모델을 그대로 사용한다. */
+export function repairClusterRefs(model: ArchitectureModel): { model: ArchitectureModel; detached: number } {
+  const placements = new Map<string, number>();
+  for (const placement of eksPlacements(model)) {
+    placements.set(placement.componentId, (placements.get(placement.componentId) ?? 0) + 1);
+  }
+  const linked = new Set<string>();
+  let detached = 0;
+  const views = model.views.map((view) => {
+    if (view.clusterRef === undefined) return view;
+    if (view.kind === 'kubernetes' && placements.get(view.clusterRef) === 1 && !linked.has(view.clusterRef)) {
+      linked.add(view.clusterRef);
+      return view;
+    }
+    const repaired = { ...view };
+    delete repaired.clusterRef;
+    detached++;
+    return repaired;
+  });
+  return { model: detached ? { ...model, views } : model, detached };
+}
+
+export function setClusterRef(model: ArchitectureModel, viewId: string, clusterId?: string): ArchitectureModel {
+  return withView(model, viewId, (_model, view) => {
+    if (view.kind !== 'kubernetes' || view.clusterRef === clusterId) return false;
+    if (!clusterId) { delete view.clusterRef; return; }
+    if (eksPlacements(model).filter((p) => p.componentId === clusterId).length !== 1
+        || model.views.some((other) => other.id !== viewId && other.clusterRef === clusterId)) return false;
+    view.clusterRef = clusterId;
+  });
+}
+
 export type RunLocation = { viewId: string; variant: string; nodeId: string; implementer: string; container: string | null; instances: number | null };
 
 /** Logical 컴포넌트의 배치안별 실행 위치 (04 §6.10: "현재 · PaaS → Railway / backend (node) ×1") */
 export function runLocations(model: ArchitectureModel, logicalId: string): RunLocation[] {
   const out: RunLocation[] = [];
   const impls = Object.values(model.relations).filter((r) => r.type === 'realizes' && r.to === logicalId).map((r) => r.from);
-  for (const v of deploymentViews(model)) {
+  const clusters = new Map(eksPlacements(model).map((p) => [p.componentId, p]));
+  for (const v of model.views) {
+    if (!['deployment', 'aws', 'kubernetes'].includes(v.kind)) continue;
+    const cluster = v.clusterRef ? clusters.get(v.clusterRef) : undefined;
     const byId = new Map(v.nodes.map((n) => [n.id, n]));
     for (const n of v.nodes) {
       if (!n.componentId || !impls.includes(n.componentId)) continue;
@@ -947,8 +1038,10 @@ export function runLocations(model: ArchitectureModel, logicalId: string): RunLo
       let parent = n.parentId ? byId.get(n.parentId) : undefined;
       // 가장 가까운 컨테이너 컴포넌트(VM·플랫폼 등)의 이름
       while (parent && !parent.componentId) parent = parent.parentId ? byId.get(parent.parentId) : undefined;
-      const instances = typeof c.properties?.instances === 'number' ? (c.properties.instances as number) : null;
-      out.push({ viewId: v.id, variant: v.variant ?? '', nodeId: n.id, implementer: c.name, container: parent?.componentId ? model.components[parent.componentId]?.name ?? null : null, instances });
+      if (!c) continue;
+      const count = v.kind === 'kubernetes' ? c.properties?.replicas : c.properties?.instances;
+      const instances = typeof count === 'number' ? count : null;
+      out.push({ viewId: v.id, variant: cluster ? [cluster.variant, cluster.name, v.variant ?? v.name].join(' → ') : v.variant ?? v.name, nodeId: n.id, implementer: c.name, container: parent?.componentId ? model.components[parent.componentId]?.name ?? null : null, instances });
     }
   }
   return out;

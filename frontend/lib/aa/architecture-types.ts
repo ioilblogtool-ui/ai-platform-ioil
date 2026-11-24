@@ -78,6 +78,7 @@ export interface View {
   edges: ViewEdge[];
   viewport?: { x: number; y: number; zoom: number };
   variant?: string;             // deployment 배치안 이름 (Sprint 7: 필수 1~60자)
+  clusterRef?: string;
   strategyMd?: string;          // deployment 배포 전략 Markdown (Sprint 7, 64KB)
 }
 
@@ -178,6 +179,7 @@ export type CompareChange =
   | { kind: 'relation.requirements'; relationId: string; relationType: string; from: string; to: string; fromId: string; toId: string; added: string[]; removed: string[] }
   | { kind: 'view.added' | 'view.removed'; viewId: string; viewKind: string; variant: string }
   | { kind: 'view.renamed'; viewId: string; viewKind: string; before: string; after: string }
+  | { kind: 'view.cluster'; viewId: string; before: string | null; after: string | null }
   | { kind: 'view.strategy'; viewId: string; variant: string; change: 'added' | 'modified' | 'removed' }
   | { kind: 'view.node.added' | 'view.node.removed' | 'layout.moved' | 'layout.resized'; viewId: string; nodeId: string; name: string }
   | { kind: 'view.node.reparented'; viewId: string; nodeId: string; name: string; before: string | null; after: string | null }
