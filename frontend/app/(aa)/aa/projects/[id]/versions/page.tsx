@@ -17,6 +17,7 @@ import { miniCanvasLayout } from '@/lib/aa/overview';
 import { viewLabel } from '@/lib/aa/compare-format';
 import { eksPlacements } from '@/lib/aa/model-ops';
 import { layoutNote, summaryParts } from '@/lib/aa/version-format';
+import { versionStrategies } from '@/lib/aa/strategy-ops';
 
 const muted: CSSProperties = { color: 'rgba(255,255,255,0.45)', fontSize: 12.5 };
 const cell: CSSProperties = { padding: '7px 10px', textAlign: 'left', borderBottom: '1px solid #ffffff0d', fontSize: 12.5, verticalAlign: 'top' };
@@ -240,6 +241,7 @@ function VersionDetailView({ projectId, detail, onRestore, onCompare, previousId
   const codes = (ids: string[]) => ids.map((rid) => reqCode.get(rid)).filter(Boolean).join(', ') || '—';
   const parts = summaryParts(detail.diffSummary);
   const note = layoutNote(detail.diffSummary);
+  const strategies = versionStrategies(detail.model, (rid) => reqCode.get(rid));
   return (
     <>
       <Card>
@@ -294,6 +296,30 @@ function VersionDetailView({ projectId, detail, onRestore, onCompare, previousId
             </table>}
       </Card>
 
+      {strategies.length > 0 && <Card>
+        <b style={{ fontSize: 13.5 }}>발행 당시 배포 전략</b>
+        <div style={{ display: 'grid', gap: 12, marginTop: 8 }} data-testid="aa-version-strategies">
+          {strategies.map((s) => (
+            <div key={s.viewId} data-testid="aa-version-strategy" style={{ fontSize: 12.5, display: 'grid', gap: 3 }}>
+              <div style={{ color: '#c8a96e' }}>{s.variant}</div>
+              <div><span style={muted}>릴리스</span> {s.release}{s.environments ? ` · ${s.environments}` : ''}</div>
+              {s.gates.map((g, i) => (
+                <div key={i}><span style={muted}>중단 기준</span> {g.name} · {g.text}{g.requirements.length ? ` · ${g.requirements.join(', ')}` : ''}</div>
+              ))}
+              <div><span style={muted}>이미지 롤백</span> {s.rollback}</div>
+              {s.fallback && <div>
+                <span style={muted}>VM 복귀</span>{' '}
+                {s.fallback.status.state === 'ok' ? s.fallback.status.variant
+                  : s.fallback.status.state === 'no-executor' ? <span style={{ color: '#f5a524' }}>⚠ {s.fallback.status.variant} — 실행 요소 없음</span>
+                  : <span style={{ color: '#f5a524' }}>⚠ VM 복귀 대상 미지정</span>}
+                {' · '}{s.fallback.text}
+              </div>}
+              <div style={{ ...muted, fontSize: 11.5 }}>ADR · Validation — Phase 3에서 연결</div>
+            </div>
+          ))}
+        </div>
+      </Card>}
+
       <Card>
         <b style={{ fontSize: 13.5 }}>컴포넌트 {components.length} · 관계 {relations.length}</b>
         <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
@@ -302,7 +328,7 @@ function VersionDetailView({ projectId, detail, onRestore, onCompare, previousId
         </table>
         {relations.length > 0 && <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12 }}>
           <thead><tr><th style={cell}>관계</th><th style={cell}>프로토콜</th><th style={cell}>설명</th><th style={cell}>요구사항</th></tr></thead>
-          <tbody>{relations.map((r) => <tr key={r.id}><td style={cell}>{nameOf(r.from)} → {nameOf(r.to)}</td><td style={cell}>{[r.protocol, r.mode === 'async' ? '비동기' : r.mode === 'sync' ? '동기' : null].filter(Boolean).join(' · ') || '—'}</td><td style={cell}>{r.label ?? '—'}</td><td style={cell}>{codes(r.requirementIds)}</td></tr>)}</tbody>
+          <tbody>{relations.map((r) => <tr key={r.id}><td style={cell}>{nameOf(r.from)} → {nameOf(r.to)}</td><td style={cell}>{[r.protocol, r.mode === 'async' ? '비동기' : r.mode === 'sync' ? '동기' : null].filter(Boolean).join(' · ') || (r.type !== 'calls' ? r.type : '—')}</td><td style={cell}>{r.label ?? '—'}</td><td style={cell}>{codes(r.requirementIds)}</td></tr>)}</tbody>
         </table>}
       </Card>
 

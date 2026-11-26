@@ -10,6 +10,7 @@ const { summarize, hasSemanticChanges } = require('../../lib/aa/graph-diff');
 const { buildSnapshot, snapshotHash, FIELDS } = require('../../lib/aa/requirements-snapshot');
 const { layoutChanges } = require('../../lib/aa/model-canon');
 const { reconcile } = require('../../lib/aa/requirement-refs');
+const { placementWarnings } = require('../../lib/aa/architecture-validator');
 
 const router = express.Router({ mergeParams: true });
 
@@ -98,7 +99,10 @@ router.get('/preview', wrap(async (req, res) => {
   const c = await computePublish(req);
   if (!c) return sendError(res, 404, 'NOT_FOUND', 'Draft를 찾을 수 없습니다.');
   const taken = await loadLabels(req);
+  // Sprint 11 (C2): VM 복귀 대상 미지정·실행 요소 없음(V19)은 발행을 막지 않고 미리보기에 경고로 담는다. 없으면 키 생략
+  const warnings = placementWarnings(c.draft.model).filter((w) => w.rule === 'V19');
   res.json({
+    ...(warnings.length ? { warnings } : {}),
     data: {
       revision: c.draft.revision,
       latestVersion: c.latest ? { id: c.latest.id, label: c.latest.label, versionNo: c.latest.version_no } : null,

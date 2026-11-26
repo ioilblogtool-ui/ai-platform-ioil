@@ -30,7 +30,7 @@ const eksNode = (m) => view(m, AWS).nodes.find((n) => n.componentId === EKS);
 describe('AWS·K8s View 추가·이름 변경', () => {
   it('AWS View는 최대 3개, id 접두사 view_aws_, name 고정 AWS', () => {
     const newId = idGen();
-    let m = sample.model();
+    let m = sample.baseModel();
     for (const name of ['대안 A', '대안 B']) {
       const r = addInfrastructureView(m, 'aws', name, newId);
       assert.equal(r.error, undefined);
@@ -46,7 +46,7 @@ describe('AWS·K8s View 추가·이름 변경', () => {
 
   it('K8s View는 최대 5개, 같은 종류 안에서 이름 중복 불가, 미지정 clusterRef 허용', () => {
     const newId = idGen();
-    let m = sample.model();
+    let m = sample.baseModel();
     const dup = addInfrastructureView(m, 'kubernetes', 'tidamungu-prod', newId);
     assert.ok(dup.error, '같은 이름은 거부');
     for (const name of ['k2', 'k3', 'k4', 'k5']) m = addInfrastructureView(m, 'kubernetes', name, newId).model;
@@ -57,7 +57,7 @@ describe('AWS·K8s View 추가·이름 변경', () => {
   });
 
   it('이름 변경은 같은 종류 안에서만 중복을 본다', () => {
-    const m = sample.model();
+    const m = sample.baseModel();
     assert.equal(renameDeploymentView(m, AWS, '현재 · VM').error, undefined, 'deployment와 같은 이름은 허용');
     const r = renameDeploymentView(m, K8S, 'eks-prod-workloads');
     assert.equal(view(r.model, K8S).variant, 'eks-prod-workloads');
@@ -67,7 +67,7 @@ describe('AWS·K8s View 추가·이름 변경', () => {
 
 describe('EKS ↔ K8s clusterRef 수명주기 (Sprint 10 Q4)', () => {
   it('EKS 컴포넌트 삭제는 K8s View 연결만 해제하고 워크로드를 보존한다', () => {
-    const m = sample.model();
+    const m = sample.baseModel();
     const before = view(m, K8S).nodes.length;
     const next = removeNodes(m, AWS, [eksNode(m).id], { deleteComponents: true });
     assert.equal(next.components[EKS], undefined);
@@ -78,12 +78,12 @@ describe('EKS ↔ K8s clusterRef 수명주기 (Sprint 10 Q4)', () => {
   });
 
   it('EKS "노드만 제거"는 하지 않는다 (입력 모델 그대로)', () => {
-    const m = sample.model();
+    const m = sample.baseModel();
     assert.equal(removeNodes(m, AWS, [eksNode(m).id], { deleteComponents: false }), m);
   });
 
   it('EKS를 가진 AWS 배치안 삭제도 연결을 해제하고 K8s·Logical·VM 배치를 보존한다', () => {
-    const m = sample.model();
+    const m = sample.baseModel();
     const next = removeAwsView(m, AWS);
     assert.equal(view(next, AWS), undefined);
     assert.equal(next.components[EKS], undefined);
@@ -95,7 +95,7 @@ describe('EKS ↔ K8s clusterRef 수명주기 (Sprint 10 Q4)', () => {
   });
 
   it('AWS 배치안 복제: 복제본 EKS는 새 id·미연결, 원본 연결 유지, K8s View는 복사하지 않음', () => {
-    const m = sample.model();
+    const m = sample.baseModel();
     const r = duplicateAwsView(m, AWS, '목표 · EKS 복제', idGen());
     assert.equal(r.error, undefined);
     const copy = view(r.model, r.viewId);
@@ -109,7 +109,7 @@ describe('EKS ↔ K8s clusterRef 수명주기 (Sprint 10 Q4)', () => {
   });
 
   it('K8s View 삭제는 Logical·AWS·VM 배치를 보존한다', () => {
-    const m = sample.model();
+    const m = sample.baseModel();
     const next = removeKubernetesView(m, K8S);
     assert.equal(view(next, K8S), undefined);
     assert.ok(next.components[EKS]);
@@ -119,7 +119,7 @@ describe('EKS ↔ K8s clusterRef 수명주기 (Sprint 10 Q4)', () => {
 
   it('setClusterRef: 한 EKS에 K8s View 하나, 해제는 언제나 가능', () => {
     const newId = idGen();
-    let m = addInfrastructureView(sample.model(), 'kubernetes', 'second', newId).model;
+    let m = addInfrastructureView(sample.baseModel(), 'kubernetes', 'second', newId).model;
     const second = m.views.at(-1).id;
     assert.equal(setClusterRef(m, second, EKS), m, '이미 다른 View가 쓰는 EKS는 거부');
     m = setClusterRef(m, K8S);
@@ -130,7 +130,7 @@ describe('EKS ↔ K8s clusterRef 수명주기 (Sprint 10 Q4)', () => {
   });
 
   it('repairClusterRefs: 끊긴 연결만 해제한다 (Draft 복구)', () => {
-    const m = sample.model();
+    const m = sample.baseModel();
     assert.equal(repairClusterRefs(m).detached, 0);
     const broken = structuredClone(m);
     view(broken, AWS).nodes = view(broken, AWS).nodes.filter((n) => n.componentId !== EKS);

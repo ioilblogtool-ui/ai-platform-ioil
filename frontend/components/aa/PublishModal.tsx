@@ -88,6 +88,14 @@ export default function PublishModal({ projectId, onClose, onPublished }: {
                 </div>)}
           </div>
 
+          {/* Sprint 11 (C2): VM 복귀 대상 미지정·실행 요소 없음 — 발행은 막지 않는다 */}
+          {preview?.warnings?.length ? (
+            <div data-testid="aa-publish-warnings" style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(245,165,36,0.08)', border: '1px solid rgba(245,165,36,0.25)', color: '#f5a524', fontSize: 12.5, display: 'grid', gap: 4 }}>
+              {preview.warnings.map((w, i) => <span key={i}>⚠ {w.message}</span>)}
+              <span style={{ ...muted, fontSize: 11.5 }}>경고가 있어도 발행할 수 있습니다. 설계 중인 상태가 버전에 그대로 남습니다.</span>
+            </div>
+          ) : null}
+
           <label style={field}>
             <span style={fieldLabel}>라벨</span>
             <input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={LABEL_MAX + 10} data-testid="aa-publish-label"

@@ -24,7 +24,7 @@ const ok = (m) => assert.deepEqual(validateModel(m).errors, []);
 
 /** 샘플 + 빈 운영 설계 배치안(조회 API 참조 노드, Prometheus·CI·Registry 노드). 관계는 connect로 만든다 */
 function base() {
-  const m = sample.model();
+  const m = sample.baseModel();
   Object.assign(m.components, {
     cmp_prom: comp('cmp_prom', 'ops.metrics', 'Prometheus'),
     cmp_ci: comp('cmp_ci', 'ops.ci', 'CI'),

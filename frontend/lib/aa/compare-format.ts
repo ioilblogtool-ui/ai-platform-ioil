@@ -4,7 +4,15 @@ import type { ArchitectureModel, CompareChange, CompareViewMeta, FieldChange } f
 
 export type Tone = 'added' | 'removed' | 'modified';
 export type GroupKey = 'component' | 'relation' | 'flow' | 'links' | 'view' | 'requirement' | 'layout';
-export interface CompareItem { change: CompareChange; text: string; detail?: string; tone: Tone; viewId?: string }
+export interface CompareItem { change: CompareChange; text: string; detail?: string; tone: Tone; viewId?: string; /** Sprint 11: 주의 문구 */ warning?: string }
+
+/** Sprint 11 (Q7): view.strategy의 parts → 화면 문구. 순서는 서버 parts 순서 */
+const STRATEGY_PART_LABEL: Record<string, string> = {
+  markdown: 'Markdown', release: '릴리스 방식', gates: '중단 기준', rollback: '이미지 롤백',
+  fallback: 'VM 복귀', environments: '환경·승격', dbChange: 'DB 변경',
+};
+export const strategyPartLabels = (parts: readonly string[] | undefined) => (parts ?? []).map((p) => STRATEGY_PART_LABEL[p] ?? p);
+export const FALLBACK_UNSET = '⚠ VM 복귀 대상 미지정';
 export interface CompareGroup { key: GroupKey; title: string; items: CompareItem[] }
 
 const GROUPS: { key: GroupKey; title: string }[] = [
@@ -99,9 +107,16 @@ function describe(c: CompareChange, viewName: (id: string) => string): { group: 
     case 'view.cluster':
       return { group: 'view', item: { change: c, tone: 'modified', text: `K8s 클러스터 연결 · ${viewName(c.viewId)}`,
         detail: `${c.before ?? '미지정'} → ${c.after ?? '미지정'}`, viewId: c.viewId } };
-    case 'view.strategy':
-      return { group: 'view', item: { change: c, tone: c.change === 'added' ? 'added' : c.change === 'removed' ? 'removed' : 'modified',
-        text: `배포 전략 ${c.change === 'added' ? '작성' : c.change === 'removed' ? '삭제' : '수정'} · ${c.variant}`, viewId: c.viewId } };
+    case 'view.strategy': {
+      const tone: Tone = c.change === 'added' ? 'added' : c.change === 'removed' ? 'removed' : 'modified';
+      // Sprint 11 (Q7): 수정이면 바뀐 하위 항목을 붙인다 — "배포 전략 변경 · 중단 기준"
+      const labels = c.change === 'modified' ? strategyPartLabels(c.parts) : [];
+      const text = labels.length
+        ? `배포 전략 변경 · ${labels.join(' · ')} — ${c.variant}`
+        : `배포 전략 ${c.change === 'added' ? '작성' : c.change === 'removed' ? '삭제' : '수정'} · ${c.variant}`;
+      const warning = c.warnings?.includes('fallback-unset') ? FALLBACK_UNSET : undefined;
+      return { group: 'view', item: { change: c, tone, text, viewId: c.viewId, ...(warning ? { warning } : {}) } };
+    }
     case 'view.node.added':
       return { group: 'view', item: { change: c, tone: 'added', text: `${viewName(c.viewId)}에 ${c.name} 추가`, viewId: c.viewId } };
     case 'view.node.removed':

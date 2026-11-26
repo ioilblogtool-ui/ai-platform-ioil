@@ -96,3 +96,25 @@ describe('compare-format · Sprint 8', () => {
     assert.deepEqual(summaryParts(s), ['+ API Flow 1', '~ API Flow 2']);
   });
 });
+
+describe('Sprint 11 Step 5: view.strategy parts·미지정 경고 (Q7·C2)', () => {
+  const sv = [{ id: 'view_aws_migration', kind: 'aws', name: 'AWS', variant: '목표 · EKS' }];
+  it('수정이면 바뀐 하위 항목을 문구로 — "배포 전략 변경 · 중단 기준" (S11-4a)', () => {
+    const [g] = groupChanges([{ kind: 'view.strategy', viewId: 'view_aws_migration', variant: '목표 · EKS', change: 'modified', parts: ['gates'] }], sv);
+    assert.equal(g.items[0].text, '배포 전략 변경 · 중단 기준 — 목표 · EKS');
+    assert.equal(g.items[0].warning, undefined);
+  });
+  it('VM 복귀만 바뀌고 대상이 비면 경고를 붙인다 (S11-4b)', () => {
+    const [g] = groupChanges([{ kind: 'view.strategy', viewId: 'view_aws_migration', variant: '목표 · EKS', change: 'modified', parts: ['fallback'], warnings: ['fallback-unset'] }], sv);
+    assert.equal(g.items[0].text, '배포 전략 변경 · VM 복귀 — 목표 · EKS');
+    assert.equal(g.items[0].warning, '⚠ VM 복귀 대상 미지정');
+  });
+  it('여러 부분은 서버 순서대로, parts 없는 옛 응답·작성은 기존 문구 (S11-4e)', () => {
+    const items = groupChanges([
+      { kind: 'view.strategy', viewId: 'v', variant: 'A', change: 'modified', parts: ['release', 'environments', 'dbChange', 'markdown'] },
+      { kind: 'view.strategy', viewId: 'v', variant: 'A', change: 'modified' },
+      { kind: 'view.strategy', viewId: 'v', variant: 'A', change: 'added', parts: ['gates'] },
+    ])[0].items.map((i) => i.text);
+    assert.deepEqual(items, ['배포 전략 변경 · 릴리스 방식 · 환경·승격 · DB 변경 · Markdown — A', '배포 전략 수정 · A', '배포 전략 작성 · A']);
+  });
+});

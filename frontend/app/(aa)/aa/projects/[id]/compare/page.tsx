@@ -162,6 +162,7 @@ function Compare({ id }: { id: string }) {
                             border: '1px solid rgba(255,255,255,0.06)' }}>
                           <span style={{ color: TONE[it.tone].color, fontWeight: 700, marginRight: 6 }}>{TONE[it.tone].mark}</span>{it.text}
                           {it.detail && <div style={{ ...muted, fontSize: 11.5, marginTop: 2, paddingLeft: 14 }}>{it.detail}</div>}
+                          {it.warning && <div data-testid="aa-compare-warning" style={{ color: '#f5a524', fontSize: 11.5, marginTop: 2, paddingLeft: 14 }}>{it.warning}</div>}
                         </button>
                       ))}
                     </div>

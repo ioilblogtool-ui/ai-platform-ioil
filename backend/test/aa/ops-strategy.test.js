@@ -21,7 +21,7 @@ const rel = (id, type, from, to) => ({ id, type, from, to, requirementIds: [] })
 
 /** 샘플(VM·AWS·K8s)에 운영 설계 배치안을 더한 모델. 조회 API(cmp_query)는 참조 노드 */
 function opsModel() {
-  const m = sample.model();
+  const m = sample.baseModel();
   Object.assign(m.components, {
     cmp_prom: comp('cmp_prom', 'ops.metrics', 'Prometheus', { scrapeInterval: '30s' }),
     cmp_alert: comp('cmp_alert', 'ops.alerting', 'p95 알림', { expr: 'p95 > 0.3', for: '5m', channel: 'slack', receiverRole: 'on-call' }),
@@ -209,8 +209,8 @@ describe('해시·Diff (Q7, S11-4)', () => {
   const pub = (model) => ({ model, snapshot: {} });
 
   it('전략이 없는 모델의 정규화에는 strategy 키가 없다 (해시 호환)', () => {
-    assert.ok(canonModel(sample.model()).views.every((v) => !('strategy' in v)));
-    assert.equal(modelHash(sample.model()), modelHash(sample.model()));
+    assert.ok(canonModel(sample.baseModel()).views.every((v) => !('strategy' in v)));
+    assert.equal(modelHash(sample.baseModel()), modelHash(sample.baseModel()));
   });
 
   it('게이트 requirementIds 순서만 바뀌면 같은 해시, 의미 변경 없음 (S11-4c)', () => {
@@ -260,7 +260,7 @@ describe('해시·Diff (Q7, S11-4)', () => {
 
 describe('Logical 출력과 요구사항 참조 (Q4·Q8)', () => {
   it('ops 컴포넌트는 Logical 출력에서 빠진다 → 출력이 ops 없는 모델과 같다', () => {
-    const plain = normalizeModel(sample.model());
+    const plain = normalizeModel(sample.baseModel());
     const withOps = normalizeModel(opsModel());
     assert.deepEqual(withOps, plain);
   });

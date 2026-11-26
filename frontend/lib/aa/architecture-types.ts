@@ -177,6 +177,8 @@ export interface VersionRequirement {
   deleted?: true;
 }
 export interface VersionDetail extends VersionListItem { model: ArchitectureModel; readmeMd: string; requirements: VersionRequirement[] }
+export type StrategyPart = 'markdown' | 'release' | 'gates' | 'rollback' | 'fallback' | 'environments' | 'dbChange';
+
 export interface PublishPreview {
   revision: number;
   latestVersion: VersionRef | null;
@@ -185,6 +187,8 @@ export interface PublishPreview {
   noChanges: boolean;
   layoutOnly: number;
   snapshotHash: string;
+  /** Sprint 11 (C2): V19 VM 복귀 경고 — 발행을 막지 않는다 */
+  warnings?: ValidationIssue[];
 }
 export type FieldChange = { path: string; before: unknown; after: unknown };
 /** GET /architecture/compare 의 변경 한 건 (Sprint 7 Step 4) */
@@ -198,7 +202,8 @@ export type CompareChange =
   | { kind: 'view.added' | 'view.removed'; viewId: string; viewKind: string; variant: string }
   | { kind: 'view.renamed'; viewId: string; viewKind: string; before: string; after: string }
   | { kind: 'view.cluster'; viewId: string; before: string | null; after: string | null }
-  | { kind: 'view.strategy'; viewId: string; variant: string; change: 'added' | 'modified' | 'removed' }
+  | { kind: 'view.strategy'; viewId: string; variant: string; change: 'added' | 'modified' | 'removed';
+      /** Sprint 11: 바뀐 하위 항목 */ parts?: StrategyPart[]; /** Sprint 11 (C2): 'fallback-unset' */ warnings?: string[] }
   | { kind: 'view.node.added' | 'view.node.removed' | 'layout.moved' | 'layout.resized'; viewId: string; nodeId: string; name: string }
   | { kind: 'view.node.reparented'; viewId: string; nodeId: string; name: string; before: string | null; after: string | null }
   | { kind: 'requirement.snapshot_changed'; code: string; change: 'added' | 'modified' | 'removed'; fields: FieldChange[] }

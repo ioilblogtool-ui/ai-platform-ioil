@@ -188,7 +188,9 @@ export function createAaClient(deps: AaClientDeps) {
       return request<{ data: VersionListItem[]; total: number }>(`${p(projectId)}/architecture/versions${deps.buildQuery({ ...params })}`);
     },
     async getPublishPreview(projectId: string) {
-      return (await request<{ data: PublishPreview }>(`${p(projectId)}/architecture/versions/preview`)).data;
+      // Sprint 11 (C2): 최상위 warnings(V19 VM 복귀)를 data에 붙인다
+      const res = await request<{ data: PublishPreview; warnings?: ValidationIssue[] }>(`${p(projectId)}/architecture/versions/preview`);
+      return res.warnings?.length ? { ...res.data, warnings: res.warnings } : res.data;
     },
     async getVersion(projectId: string, versionId: string) {
       return (await request<{ data: VersionDetail }>(`${p(projectId)}/architecture/versions/${encodeURIComponent(versionId)}`)).data;

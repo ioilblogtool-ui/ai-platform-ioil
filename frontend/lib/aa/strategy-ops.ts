@@ -113,3 +113,28 @@ export function strategyGatesFor(model: ArchitectureModel, requirementId: string
     .filter((g) => g.requirementIds.includes(requirementId))
     .map((g) => ({ viewId: v.id, variant: v.variant ?? v.name, name: g.name, metric: g.metric, threshold: g.threshold, observeMin: g.observeMin })));
 }
+
+/**
+ * 버전 페이지용 (Sprint 11 Step 5 · C3): 그 버전의 모델·요구사항 스냅샷만으로 전략을 요약한다.
+ * 발행 뒤 Draft에서 게이트·알림 노드를 바꿔도 버전의 연결은 이 값으로 남는다. codeOf: 요구사항 id → 발행 당시 코드
+ */
+export function versionStrategies(model: ArchitectureModel, codeOf: (id: string) => string | undefined) {
+  return model.views.filter((v) => v.strategy).map((v) => {
+    const st = v.strategy!;
+    const fb = fallbackStatus(model, v);
+    const steps = st.release.type === 'canary' && st.release.canary?.steps.length ? `${st.release.canary.steps.map((x) => x.weight).join('→')}%` : '';
+    return {
+      viewId: v.id,
+      variant: v.variant ?? v.name,
+      release: `${RELEASE_LABEL[st.release.type] ?? st.release.type}${steps ? ` ${steps}` : ''}`,
+      environments: st.environments.map((e) => `${e.name}${e.approvalRole ? `(승인 ${e.approvalRole})` : ''}`).join(' → '),
+      gates: st.gates.map((g) => ({
+        name: g.name, text: `${g.metric} ${g.threshold} · 관찰 ${g.observeMin}분`,
+        requirements: g.requirementIds.map(codeOf).filter((c): c is string => Boolean(c)),
+      })),
+      rollback: `${st.rollback.method === 'previous-image' ? '이전 이미지' : '재배포'} ${st.rollback.targetMin}분 · ${st.rollback.trigger}`,
+      fallback: !st.fallback ? null
+        : { status: fb, text: `${st.fallback.trigger} · ${st.fallback.switchMethod} · ${st.fallback.ownerRole} · ${st.fallback.targetMin}분 · ${st.fallback.dbCondition}` },
+    };
+  });
+}
