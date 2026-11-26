@@ -2,6 +2,7 @@ const express = require('express');
 const supabase = require('../lib/supabase');
 const { requireAuth } = require('../middleware/auth');
 const { logActivity } = require('../lib/activity');
+const { retryGenerationJob } = require('./generate');
 
 const router = express.Router();
 
@@ -73,12 +74,16 @@ router.post('/:id/retry', requireAuth, async (req, res) => {
     return res.status(400).json({ error: '실패 상태의 Job만 재시도할 수 있습니다.' });
   }
 
-  // job 타입에 맞는 generate 엔드포인트를 내부 호출하는 대신
-  // 재시도용 신규 job 레코드를 queued로 생성 후 프론트에서 generate 재호출하도록 안내
-  await supabase
-    .from('generation_jobs')
-    .update({ status: 'queued', error_message: null })
-    .eq('id', req.params.id);
+  // 같은 job 레코드를 queued로 되돌리고 백그라운드에서 다시 생성
+  let started;
+  try {
+    started = await retryGenerationJob(job);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+  if (!started) {
+    return res.status(400).json({ error: '이 Job은 재시도할 수 없습니다. 콘텐츠가 삭제됐거나 지원하지 않는 작업 유형입니다.' });
+  }
 
   await logActivity({
     content_item_id: job.content_item_id,

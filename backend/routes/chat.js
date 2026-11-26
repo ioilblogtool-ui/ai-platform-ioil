@@ -6,6 +6,15 @@ const { requireAuth } = require('../middleware/auth');
 const router = express.Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+const HISTORY_LIMIT = 20;
+
+// 최신순으로 가져온 히스토리를 시간순으로 돌리고, Claude 요청이 user 메시지로 시작하도록 앞쪽 assistant 메시지를 버린다
+function toChronologicalHistory(history) {
+  const ordered = [...(history || [])].reverse();
+  while (ordered.length && ordered[0].role !== 'user') ordered.shift();
+  return ordered;
+}
+
 // 로그인한 사용자 소유의 대화만 반환 (없거나 남의 것이면 null)
 async function findOwnedConversation(conversationId, userId) {
   const { data, error } = await supabase
@@ -74,8 +83,8 @@ router.post('/', requireAuth, async (req, res) => {
       .from('messages')
       .select('role, content')
       .eq('conversation_id', convId)
-      .order('created_at', { ascending: true })
-      .limit(20);
+      .order('created_at', { ascending: false })
+      .limit(HISTORY_LIMIT);
 
     // 3. 유저 메시지 DB 저장
     await supabase.from('messages').insert({
@@ -86,7 +95,7 @@ router.post('/', requireAuth, async (req, res) => {
 
     // 4. Claude API 호출
     const claudeMessages = [
-      ...(history || []),
+      ...toChronologicalHistory(history),
       { role: 'user', content: message }
     ];
 
@@ -153,10 +162,10 @@ router.post('/stream', requireAuth, async (req, res) => {
       .from('messages')
       .select('role, content')
       .eq('conversation_id', conversation_id)
-      .order('created_at', { ascending: true })
-      .limit(20);
+      .order('created_at', { ascending: false })
+      .limit(HISTORY_LIMIT);
 
-    const messages = [...(history || []), { role: 'user', content: message }];
+    const messages = [...toChronologicalHistory(history), { role: 'user', content: message }];
 
     let fullResponse = '';
 

@@ -197,19 +197,46 @@ function runInBackground(job, systemPrompt, userPrompt, onDone) {
   });
 }
 
-// ─── POST /api/generate/ideas ──────────────────────────────────────────────────
-// 아이디어 확장 — 빠른 편이라 동기 유지
-router.post('/ideas', requireAuth, async (req, res) => {
-  const { content_item_id } = req.body;
-  if (!content_item_id) return res.status(400).json({ error: 'content_item_id가 필요합니다.' });
+/**
+ * 문서 생성 라우트 등록: prepare()로 프롬프트와 저장 로직을 만든 뒤
+ * job을 등록하고 즉시 job_id를 반환, 생성은 백그라운드에서 실행.
+ *
+ * prepare(content_item_id, userId, body) → null(콘텐츠 없음) | { job_type, systemPrompt, userPrompt, onDone(job) }
+ * 같은 prepare 함수를 Jobs 재시도(retryGenerationJob)에서도 재사용한다.
+ */
+function registerGenerateRoute(path, prepare) {
+  router.post(path, requireAuth, async (req, res) => {
+    const { content_item_id } = req.body;
+    if (!content_item_id) return res.status(400).json({ error: 'content_item_id가 필요합니다.' });
 
+    try {
+      const prep = await prepare(content_item_id, req.user.id, req.body);
+      if (!prep) return res.status(404).json({ error: '콘텐츠를 찾을 수 없습니다.' });
+
+      const job = await createJob({
+        content_item_id, user_id: req.user.id, job_type: prep.job_type, userPrompt: prep.userPrompt,
+      });
+
+      // 즉시 job_id 반환
+      res.json({ job_id: job.id, status: 'queued' });
+
+      // 백그라운드에서 Claude 호출 + 문서 저장
+      runInBackground(job, prep.systemPrompt, prep.userPrompt, prep.onDone(job));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+}
+
+// ─── POST /api/generate/ideas ──────────────────────────────────────────────────
+async function prepareIdeas(content_item_id, userId) {
   const { data: item } = await supabase
     .from('content_items')
     .select('*')
     .eq('id', content_item_id)
-    .eq('user_id', req.user.id)
-    .single();
-  if (!item) return res.status(404).json({ error: '콘텐츠를 찾을 수 없습니다.' });
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!item) return null;
 
   const systemPrompt = `당신은 콘텐츠 전략가입니다. 주어진 아이디어를 바탕으로 웹 콘텐츠 기획안을 작성합니다.
 결과는 반드시 아래 JSON 형식으로만 응답하세요. 설명 텍스트 없이 JSON만 출력하세요.
@@ -229,9 +256,42 @@ SEO 키워드: ${item.seo_keyword || '미지정'}
 아이디어 원문:
 ${item.raw_idea || item.title}`;
 
+  return {
+    job_type: 'idea_expand',
+    systemPrompt,
+    userPrompt,
+    onDone: (job) => async (result, tokens_used) => {
+      const parsed = parseJsonSafe(result) || { result_summary: result };
+
+      const { data: idea } = await supabase
+        .from('content_ideas')
+        .insert({ content_item_id, model: 'claude', generation_job_id: job.id, ...parsed })
+        .select()
+        .single();
+
+      await logActivity({
+        content_item_id, user_id: userId, event_type: 'idea_generated',
+        description: 'Claude로 아이디어 생성',
+        metadata: { idea_id: idea.id, tokens_used },
+      });
+
+      return idea;
+    },
+  };
+}
+
+// 아이디어 확장 — 빠른 편이라 동기 유지
+router.post('/ideas', requireAuth, async (req, res) => {
+  const { content_item_id } = req.body;
+  if (!content_item_id) return res.status(400).json({ error: 'content_item_id가 필요합니다.' });
+
+  let job = null;
   try {
-    const job = await createJob({
-      content_item_id, user_id: req.user.id, job_type: 'idea_expand', userPrompt,
+    const prep = await prepareIdeas(content_item_id, req.user.id);
+    if (!prep) return res.status(404).json({ error: '콘텐츠를 찾을 수 없습니다.' });
+
+    job = await createJob({
+      content_item_id, user_id: req.user.id, job_type: prep.job_type, userPrompt: prep.userPrompt,
     });
 
     // 아이디어는 JSON 파싱이 필요해 동기 처리 유지 (짧은 응답)
@@ -240,48 +300,47 @@ ${item.raw_idea || item.title}`;
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
+      system: prep.systemPrompt,
+      messages: [{ role: 'user', content: prep.userPrompt }],
     });
 
     const result = response.content[0].text;
     const tokens_used = response.usage.input_tokens + response.usage.output_tokens;
 
-    const parsed = parseJsonSafe(result) || { result_summary: result };
-
-    const { data: idea } = await supabase
-      .from('content_ideas')
-      .insert({ content_item_id, model: 'claude', generation_job_id: job.id, ...parsed })
-      .select()
-      .single();
+    const idea = await prep.onDone(job)(result, tokens_used);
 
     await supabase.from('generation_jobs').update({ status: 'done', result, tokens_used }).eq('id', job.id);
-
-    await logActivity({
-      content_item_id, user_id: req.user.id, event_type: 'idea_generated',
-      description: 'Claude로 아이디어 생성',
-      metadata: { idea_id: idea.id, tokens_used },
-    });
 
     res.json({ idea, tokens_used });
 
   } catch (err) {
+    // 실패한 job이 running에 멈추지 않도록 failed로 기록 (Jobs 화면에서 재시도 가능)
+    if (job) {
+      await supabase
+        .from('generation_jobs')
+        .update({ status: 'failed', error_message: err.message })
+        .eq('id', job.id);
+      await logActivity({
+        content_item_id, user_id: req.user.id, event_type: 'job_failed',
+        description: `${job.job_type} 생성 실패`,
+        metadata: { job_id: job.id, error: err.message },
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 });
 
 // ─── POST /api/generate/plan ───────────────────────────────────────────────────
-router.post('/plan', requireAuth, async (req, res) => {
-  const { content_item_id, template_content } = req.body;
-  if (!content_item_id) return res.status(400).json({ error: 'content_item_id가 필요합니다.' });
+async function preparePlan(content_item_id, userId, body = {}) {
+  const { template_content } = body;
 
   const { data: item } = await supabase
     .from('content_items')
     .select('*, content_ideas(result_summary, suggested_outline, seo_keywords, is_selected)')
     .eq('id', content_item_id)
-    .eq('user_id', req.user.id)
-    .single();
-  if (!item) return res.status(404).json({ error: '콘텐츠를 찾을 수 없습니다.' });
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!item) return null;
 
   const selectedIdea = item.content_ideas?.find(i => i.is_selected) || item.content_ideas?.[0];
 
@@ -307,59 +366,47 @@ ${Array.isArray(selectedIdea.suggested_outline) ? selectedIdea.suggested_outline
 위 정보를 바탕으로 완성도 높은 콘텐츠 기획 문서를 Markdown으로 작성해주세요.
 목차, 목적, 타겟 사용자, 핵심 기능, UI 구성, 데이터 요구사항을 포함하세요.`;
 
-  try {
-    const job = await createJob({
-      content_item_id, user_id: req.user.id, job_type: 'plan_gen', userPrompt,
-    });
+  return {
+    job_type: 'plan_gen',
+    systemPrompt,
+    userPrompt,
+    onDone: (job) => async (result, tokens_used) => {
+      const yyyymm = new Date().toISOString().slice(0, 7).replace('-', '');
+      const slug = item.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 40);
+      const file_path = `docs/plan/${yyyymm}/${slug}-v1-plan.md`;
 
-    // 즉시 job_id 반환
-    res.json({ job_id: job.id, status: 'queued' });
+      const { data: doc } = await supabase
+        .from('documents')
+        .insert({
+          content_item_id, user_id: userId,
+          doc_type: 'plan', version: 'v1', file_path, content: result, generated_by: 'claude',
+        })
+        .select()
+        .single();
 
-    // 백그라운드에서 Claude 호출 + 문서 저장
-    runInBackground(
-      { ...job, content_item_id, user_id: req.user.id },
-      systemPrompt,
-      userPrompt,
-      async (result, tokens_used) => {
-        const yyyymm = new Date().toISOString().slice(0, 7).replace('-', '');
-        const slug = item.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 40);
-        const file_path = `docs/plan/${yyyymm}/${slug}-v1-plan.md`;
+      await logActivity({
+        content_item_id, user_id: userId,
+        event_type: 'document_generated',
+        description: 'plan 문서 생성 완료',
+        metadata: { doc_id: doc.id, job_id: job.id, tokens_used },
+      });
+    },
+  };
+}
 
-        const { data: doc } = await supabase
-          .from('documents')
-          .insert({
-            content_item_id, user_id: req.user.id,
-            doc_type: 'plan', version: 'v1', file_path, content: result, generated_by: 'claude',
-          })
-          .select()
-          .single();
-
-        await logActivity({
-          content_item_id, user_id: req.user.id,
-          event_type: 'document_generated',
-          description: 'plan 문서 생성 완료',
-          metadata: { doc_id: doc.id, job_id: job.id, tokens_used },
-        });
-      }
-    );
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+registerGenerateRoute('/plan', preparePlan);
 
 // ─── POST /api/generate/design ─────────────────────────────────────────────────
-router.post('/design', requireAuth, async (req, res) => {
-  const { content_item_id, plan_doc_id, template_content } = req.body;
-  if (!content_item_id) return res.status(400).json({ error: 'content_item_id가 필요합니다.' });
+async function prepareDesign(content_item_id, userId, body = {}) {
+  const { plan_doc_id, template_content } = body;
 
   const { data: item } = await supabase
     .from('content_items')
     .select('title, content_type, category')
     .eq('id', content_item_id)
-    .eq('user_id', req.user.id)
-    .single();
-  if (!item) return res.status(404).json({ error: '콘텐츠를 찾을 수 없습니다.' });
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!item) return null;
 
   const planQuery = supabase
     .from('documents')
@@ -387,57 +434,47 @@ ${planContent || '(기획 문서 없음 — 제목과 타입을 바탕으로 설
 
 위 기획을 바탕으로 상세 화면 설계서를 Markdown으로 작성해주세요.`;
 
-  try {
-    const job = await createJob({
-      content_item_id, user_id: req.user.id, job_type: 'design_gen', userPrompt,
-    });
+  return {
+    job_type: 'design_gen',
+    systemPrompt,
+    userPrompt,
+    onDone: (job) => async (result, tokens_used) => {
+      const yyyymm = new Date().toISOString().slice(0, 7).replace('-', '');
+      const slug = item.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 40);
+      const file_path = `docs/design/${yyyymm}/${slug}-v1-design.md`;
 
-    res.json({ job_id: job.id, status: 'queued' });
+      const { data: doc } = await supabase
+        .from('documents')
+        .insert({
+          content_item_id, user_id: userId,
+          doc_type: 'design', version: 'v1', file_path, content: result, generated_by: 'claude',
+        })
+        .select()
+        .single();
 
-    runInBackground(
-      { ...job, content_item_id, user_id: req.user.id },
-      systemPrompt,
-      userPrompt,
-      async (result, tokens_used) => {
-        const yyyymm = new Date().toISOString().slice(0, 7).replace('-', '');
-        const slug = item.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 40);
-        const file_path = `docs/design/${yyyymm}/${slug}-v1-design.md`;
+      await logActivity({
+        content_item_id, user_id: userId,
+        event_type: 'document_generated',
+        description: 'design 문서 생성 완료',
+        metadata: { doc_id: doc.id, job_id: job.id, tokens_used },
+      });
+    },
+  };
+}
 
-        const { data: doc } = await supabase
-          .from('documents')
-          .insert({
-            content_item_id, user_id: req.user.id,
-            doc_type: 'design', version: 'v1', file_path, content: result, generated_by: 'claude',
-          })
-          .select()
-          .single();
-
-        await logActivity({
-          content_item_id, user_id: req.user.id,
-          event_type: 'document_generated',
-          description: 'design 문서 생성 완료',
-          metadata: { doc_id: doc.id, job_id: job.id, tokens_used },
-        });
-      }
-    );
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+registerGenerateRoute('/design', prepareDesign);
 
 // ─── POST /api/generate/dev-request ────────────────────────────────────────────
-router.post('/dev-request', requireAuth, async (req, res) => {
-  const { content_item_id, design_doc_id, target_model = 'claude', prompt_style = 'implement' } = req.body;
-  if (!content_item_id) return res.status(400).json({ error: 'content_item_id가 필요합니다.' });
+async function prepareDevRequest(content_item_id, userId, body = {}) {
+  const { design_doc_id, target_model = 'claude', prompt_style = 'implement' } = body;
 
   const { data: item } = await supabase
     .from('content_items')
     .select('title, content_type, category, target_repo, target_path')
     .eq('id', content_item_id)
-    .eq('user_id', req.user.id)
-    .single();
-  if (!item) return res.status(404).json({ error: '콘텐츠를 찾을 수 없습니다.' });
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!item) return null;
 
   const designQuery = supabase
     .from('documents')
@@ -499,43 +536,66 @@ ${designContent || '(설계 문서 없음 — 콘텐츠 정보를 바탕으로 �
 - TypeScript 타입명·export 상수명을 PREFIX 규칙에 맞게 명시할 것
 - 완료 기준: \`npm run build\` 성공 → main 머지`;
 
-  try {
-    const job = await createJob({
-      content_item_id, user_id: req.user.id, job_type: 'dev_request_gen', userPrompt,
-    });
+  return {
+    job_type: 'dev_request_gen',
+    systemPrompt,
+    userPrompt,
+    onDone: (job) => async (result, tokens_used) => {
+      const yyyymm = new Date().toISOString().slice(0, 7).replace('-', '');
+      const slug = item.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 40);
+      const file_path = `docs/dev-request/${yyyymm}/${slug}-v1-dev-request.md`;
 
-    res.json({ job_id: job.id, status: 'queued' });
+      const { data: doc } = await supabase
+        .from('documents')
+        .insert({
+          content_item_id, user_id: userId,
+          doc_type: 'dev_request', version: 'v1', file_path, content: result, generated_by: 'claude',
+        })
+        .select()
+        .single();
 
-    runInBackground(
-      { ...job, content_item_id, user_id: req.user.id },
-      systemPrompt,
-      userPrompt,
-      async (result, tokens_used) => {
-        const yyyymm = new Date().toISOString().slice(0, 7).replace('-', '');
-        const slug = item.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 40);
-        const file_path = `docs/dev-request/${yyyymm}/${slug}-v1-dev-request.md`;
+      await logActivity({
+        content_item_id, user_id: userId,
+        event_type: 'document_generated',
+        description: 'dev_request 문서 생성 완료',
+        metadata: { doc_id: doc.id, job_id: job.id, tokens_used, target_model },
+      });
+    },
+  };
+}
 
-        const { data: doc } = await supabase
-          .from('documents')
-          .insert({
-            content_item_id, user_id: req.user.id,
-            doc_type: 'dev_request', version: 'v1', file_path, content: result, generated_by: 'claude',
-          })
-          .select()
-          .single();
+registerGenerateRoute('/dev-request', prepareDevRequest);
 
-        await logActivity({
-          content_item_id, user_id: req.user.id,
-          event_type: 'document_generated',
-          description: 'dev_request 문서 생성 완료',
-          metadata: { doc_id: doc.id, job_id: job.id, tokens_used, target_model },
-        });
-      }
-    );
+// ─── Jobs 재시도 ───────────────────────────────────────────────────────────────
+const PREPARERS = {
+  idea_expand: prepareIdeas,
+  plan_gen: preparePlan,
+  design_gen: prepareDesign,
+  dev_request_gen: prepareDevRequest,
+};
 
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+/**
+ * 실패한 job을 같은 레코드로 다시 실행한다.
+ * 최초 요청의 옵션(template_content, *_doc_id, target_model 등)은 저장돼 있지 않아
+ * 기본값(최신 plan/design 문서, claude)으로 프롬프트를 다시 만든다.
+ * @returns {Promise<boolean>} 재실행을 시작했으면 true, 지원하지 않는 타입이거나 콘텐츠가 없으면 false
+ */
+async function retryGenerationJob(job) {
+  const prepare = PREPARERS[job.job_type];
+  if (!prepare) return false;
+
+  const prep = await prepare(job.content_item_id, job.user_id, {});
+  if (!prep) return false;
+
+  const { error } = await supabase
+    .from('generation_jobs')
+    .update({ status: 'queued', error_message: null, prompt: prep.userPrompt })
+    .eq('id', job.id);
+  if (error) throw error;
+
+  runInBackground(job, prep.systemPrompt, prep.userPrompt, prep.onDone(job));
+  return true;
+}
 
 module.exports = router;
+module.exports.retryGenerationJob = retryGenerationJob;

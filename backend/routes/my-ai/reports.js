@@ -146,7 +146,7 @@ router.post('/generate', requireAuth, async (req, res) => {
 
       contextData = { snapshots: snapshots?.slice(0, 6), goals, userAssets };
 
-      const systemPrompt = `당신은 15년 경력의 대한민국 자산관리 전문가(PB, Private Banker)입니다.
+      systemPrompt = `당신은 15년 경력의 대한민국 자산관리 전문가(PB, Private Banker)입니다.
 고액 자산가 대상 포트폴리오 분석 및 재무 컨설팅 경험을 보유하고 있습니다.
 
 [작성 원칙]

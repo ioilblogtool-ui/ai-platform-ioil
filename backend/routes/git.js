@@ -10,6 +10,15 @@ router.get('/', requireAuth, async (req, res) => {
   const { content_item_id } = req.query;
   if (!content_item_id) return res.status(400).json({ error: 'content_item_id가 필요합니다.' });
 
+  // 소유 확인
+  const { data: item } = await supabase
+    .from('content_items')
+    .select('id')
+    .eq('id', content_item_id)
+    .eq('user_id', req.user.id)
+    .maybeSingle();
+  if (!item) return res.status(404).json({ error: '콘텐츠를 찾을 수 없습니다.' });
+
   const { data, error } = await supabase
     .from('git_changes')
     .select('*')

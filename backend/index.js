@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const requestLog = require('./middleware/requestLog');
+const hideServerErrors = require('./middleware/hideServerErrors');
 
 const chatRoutes = require('./routes/chat');
 const conversationRoutes = require('./routes/conversations');
@@ -42,6 +43,7 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+app.use(hideServerErrors);
 
 // 헬스체크
 app.get('/health', (req, res) => {
