@@ -38,14 +38,14 @@ function selectedComponentIds(model: ArchitectureModel | null, viewId: string, n
   return [...new Set(view.nodes.filter((n) => picked.has(n.id) && n.kind === 'component' && n.componentId).map((n) => n.componentId!))];
 }
 import type { InspectorEdits } from './SchemaForm';
-import { CATEGORY_COLOR, DND_MIME, paletteItems, REF_MIME, type PaletteItem } from './palette-meta';
+import { CATEGORY_COLOR, DND_MIME, OPS_UI_ENABLED, PALETTE_CATEGORY_ORDER, paletteItems, REF_MIME, type PaletteItem } from './palette-meta';
 
 // React Flow가 렌더마다 새로 만들지 않도록 컴포넌트 밖에 둔다
 const nodeTypes = { component: ComponentNode, group: GroupNode, note: NoteNode, container: ContainerNode };
 const edgeTypes = { relation: RelationEdge };
 const MODEL_WARN_BYTES = 900 * 1024;
 // 팔레트 묶음 순서. View 종류에 맞지 않는 묶음은 항목이 없어 숨겨진다 (Sprint 7: deployment 추가)
-const CATEGORY_ORDER = ['deployment', 'aws', 'kubernetes', 'application', 'data', 'general'];
+const CATEGORY_ORDER = PALETTE_CATEGORY_ORDER;
 // 새 노드를 놓을 때 커서가 노드 가운데쯤 오도록 (컴포넌트 168×56, 그룹 360×240, 노트 200×64)
 const DROP_OFFSET: Record<string, { x: number; y: number }> = { component: { x: 84, y: 28 }, group: { x: 180, y: 120 }, note: { x: 100, y: 32 } };
 
@@ -185,7 +185,7 @@ function Studio({ projectId }: { projectId: string }) {
     if (next.has(layer)) next.delete(layer); else next.add(layer);
     return next;
   }), []);
-  const showOpsBar = Boolean(s.model && s.panel === 'canvas' && hasOpsContent(s.model, s.viewId));
+  const showOpsBar = Boolean(OPS_UI_ENABLED && s.model && s.panel === 'canvas' && hasOpsContent(s.model, s.viewId));   // Q11: 숨김 빌드에서는 토글 없음(모두 표시)
   const flow = useMemo(() => (s.model ? toFlow(s.model, s.viewId, selected, warnMap, marks, highlight, showOpsBar ? hiddenLayers : new Set()) : { nodes: [], edges: [] }), [s.model, s.viewId, selected, warnMap, marks, highlight, showOpsBar, hiddenLayers]);
 
   // Sprint 8: Trace에서 넘어올 때 ?flow=<id>(빈 값이면 흐름 탭) / ?focus=<componentId> — 처음 모델이 왔을 때 한 번

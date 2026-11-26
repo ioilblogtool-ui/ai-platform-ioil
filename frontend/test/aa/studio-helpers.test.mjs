@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import * as ops from '../../lib/aa/model-ops.ts';
-import { paletteItems } from '../../components/aa/studio/palette-meta.ts';
+import { PALETTE_CATEGORY_ORDER, paletteItems } from '../../components/aa/studio/palette-meta.ts';
 import { toFlow } from '../../lib/aa/graph-mapper.ts';
 
 const require = createRequire(import.meta.url);
@@ -38,6 +38,20 @@ describe('findDropGroup', () => {
 
 describe('paletteItems', () => {
   const types = (q) => paletteItems(REGISTRY, 'logical', q).map((i) => i.type);
+
+  it('Sprint 11 (Q11) 숨김 빌드: ops: false면 배치안 팔레트에서 Operations만 빠진다', () => {
+    const on = paletteItems(REGISTRY, 'deployment');
+    const off = paletteItems(REGISTRY, 'deployment', '', { ops: false });
+    assert.equal(on.filter((i) => i.category === 'operations').length, 8);
+    assert.deepEqual(off.filter((i) => i.category === 'operations'), []);
+    assert.deepEqual(off.map((i) => i.type), on.filter((i) => i.category !== 'operations').map((i) => i.type));
+    assert.equal(paletteItems(null, 'deployment', '', { ops: false }).some((i) => i.category === 'operations'), false);
+  });
+
+  it('레지스트리의 모든 분류가 팔레트 순서에 있다 (Step 3 누락: operations 미표시)', () => {
+    const used = new Set(Object.values(REGISTRY.types).map((d) => d.category));
+    for (const c of used) assert.ok(PALETTE_CATEGORY_ORDER.includes(c), `팔레트 순서에 없는 분류: ${c}`);
+  });
 
   it('Logical 팔레트는 11종(컴포넌트 9 + Boundary·Note)', () => {
     const all = paletteItems(REGISTRY, 'logical');

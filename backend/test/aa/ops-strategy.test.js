@@ -323,6 +323,47 @@ describe('Sprint 11 over the API', { skip: dbSkipReason }, () => {
     assert.ok((g.body.warnings ?? []).some((w) => w.rule === 'V19' && /미지정/.test(w.message)));
   });
 
+  it('S11-6 ①: 예외 6종은 400 VALIDATION_FAILED, details에 규칙·경로, revision 그대로', async () => {
+    assert.equal((await save(withStrategy(opsModel()))).status, 200);
+    const rev = (await api(A).get(url)).body.data.revision;
+    const cases = [
+      ['범위 밖 값', ['V18'], /gates\[0\]\.observeMin$/, (m) => { m.views.find((v) => v.id === AWS).strategy.gates[0].observeMin = 0; }],
+      ['deployment가 아닌 복귀 대상', ['V18'], /fallback\.targetViewId$/, (m) => { m.views.find((v) => v.id === AWS).strategy.fallback.targetViewId = 'view_k8s_migration'; }],
+      ['ops 끝점이 없는 새 관계', ['V17'], /^relations\.rel_bad$/, (m) => {
+        m.relations.rel_bad = rel('rel_bad', 'scrapes', 'cmp_client', 'cmp_query');
+        m.views.find((v) => v.id === 'view_logical').edges.push({ id: 'ed_bad', relationId: 'rel_bad' });
+      }],
+      ['두 끝점이 서로 다른 View에만', ['V4', 'V17'], /rel_scrape|ed_scrape/, (m) => {
+        const ops = m.views.find((v) => v.id === OPS);
+        ops.nodes = ops.nodes.filter((n) => n.componentId !== 'cmp_query');
+        ops.edges = ops.edges.filter((e) => !['rel_logs', 'rel_sync'].includes(e.relationId));
+        delete m.relations.rel_logs; delete m.relations.rel_sync;
+      }],
+      ['엣지 양쪽 노드가 관계 끝점과 다름', ['V4', 'V17'], /scrape/, (m) => {
+        // 조회 API 노드가 없는 VM 배치안으로 scrapes 엣지를 옮긴다
+        const ops = m.views.find((v) => v.id === OPS);
+        ops.edges = ops.edges.filter((e) => e.relationId !== 'rel_scrape');
+        const vm = m.views.find((v) => v.id === VM);
+        vm.nodes.push({ id: 'nd_vm_prom', kind: 'component', componentId: 'cmp_prom', position: { x: 0, y: 500 } });
+        vm.edges.push({ id: 'ed_vm_scrape', relationId: 'rel_scrape' });
+      }],
+      ['엣지가 deployment가 아닌 View', ['V17'], /^views\[0\]\.edges\[\d+\]\.relationId$/, (m) => {
+        const logical = m.views.find((v) => v.id === 'view_logical');
+        logical.nodes.push({ id: 'nd_lp', kind: 'component', componentId: 'cmp_prom', position: { x: 0, y: 300 } });
+        logical.edges.push({ id: 'ed_lp', relationId: 'rel_scrape' });
+      }],
+    ];
+    for (const [label, rulesAllowed, pathRe, mutate] of cases) {
+      const m = withStrategy(opsModel());
+      mutate(m);
+      const s = await save(m);
+      assert.equal(s.status, 400, `${label}: ${JSON.stringify(s.body)}`);
+      assert.equal(s.body.code, 'VALIDATION_FAILED', label);
+      assert.ok(s.body.details.some((d) => rulesAllowed.includes(d.rule) && pathRe.test(d.path)), `${label}: ${JSON.stringify(s.body.details)}`);
+    }
+    assert.equal((await api(A).get(url)).body.data.revision, rev);
+  });
+
   it('게이트만 참조하는 요구사항은 삭제가 409 IN_USE (strategyGates)', async () => {
     const r = await api(A).post(`${base}/requirements`, { title: 'p95 < 300ms', kind: 'nfr' });
     assert.equal(r.status, 201, JSON.stringify(r.body));

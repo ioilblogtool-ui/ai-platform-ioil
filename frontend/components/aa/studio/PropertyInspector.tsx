@@ -6,6 +6,7 @@ import { StudioNotes } from './StudioNotes';
 import type { Component, PropertyDef, Relation } from '@/lib/aa/architecture-types';
 import { OPS_RELATION_LABEL, OPS_RELATION_TYPES, isOpsRelationType, type OpsRelationType } from '@/lib/aa/ops-relations';
 import StrategyForm from './StrategyForm';
+import { OPS_UI_ENABLED } from './palette-meta';
 import {
   componentPlacements, componentTextError, CREDENTIALS, customKeyError, DATA_CLASSES, deploymentViewSummary, ON_FAILURE, PROTOCOLS, RELATION_MODES, RETRY_BACKOFFS, realizesTargets, relationAttrError, relationFieldError, relationSummary, runLocations, STRATEGY_MAX_BYTES,
 } from '@/lib/aa/model-ops';
@@ -96,7 +97,9 @@ export default function PropertyInspector({ edits }: { edits: InspectorEdits }) 
       <strong>{view.variant}</strong>
       <div style={muted}>AWS 배치안 · 컴포넌트 {view.nodes.filter((n) => n.kind === 'component').length}</div>
       <div style={{ ...fields }}><strong>배포 전략 (구조화)</strong>
-        <StrategyForm key={`${s.projectId}:${view.id}:${JSON.stringify(view.strategy ?? null)}`} />
+        {OPS_UI_ENABLED
+          ? <StrategyForm key={`${s.projectId}:${view.id}:${JSON.stringify(view.strategy ?? null)}`} />
+          : <HiddenStrategyNote has={Boolean(view.strategy)} />}
       </div>
     </div>;
   } else {
@@ -392,6 +395,13 @@ function RunLocations({ componentId }: { componentId: string }) {
 }
 
 /** 배치안에서 아무것도 선택하지 않았을 때: 요약과 배포 전략 Markdown (DEP-01) */
+/** Sprint 11 (Q11) 숨김 빌드: 구조화 전략 폼 대신 안내만 — 저장된 값은 그대로 보존된다 */
+function HiddenStrategyNote({ has }: { has: boolean }) {
+  return <div data-testid="aa-strategy-hidden" style={muted}>
+    {has ? '구조화 전략이 저장되어 있습니다. 이 빌드에서는 편집 화면을 숨겼고, 저장·발행·복원 때 값은 그대로 유지됩니다.' : '구조화 전략 편집은 이 빌드에서 숨겨져 있습니다.'}
+  </div>;
+}
+
 function DeploymentSummary({ edits }: { edits: InspectorEdits }) {
   const s = useStudio();
   const [preview, setPreview] = useState(false);
@@ -411,10 +421,11 @@ function DeploymentSummary({ edits }: { edits: InspectorEdits }) {
           <strong style={{ flex: 1 }}>배포 전략</strong>
           {/* Sprint 11 (04 §6.10.2): [Markdown] [구조화] 두 탭 */}
           <button style={button} aria-pressed={tab === 'markdown'} data-testid="aa-strategy-tab-markdown" onClick={() => { edits.flush(); setTab('markdown'); }}>Markdown</button>
-          <button style={button} aria-pressed={tab === 'structured'} data-testid="aa-strategy-tab-structured" onClick={() => { edits.flush(); setTab('structured'); }}>구조화</button>
+          {OPS_UI_ENABLED && <button style={button} aria-pressed={tab === 'structured'} data-testid="aa-strategy-tab-structured" onClick={() => { edits.flush(); setTab('structured'); }}>구조화</button>}
           {tab === 'markdown' && <button style={button} aria-pressed={preview} onClick={() => { edits.flush(); setPreview(!preview); }}>{preview ? 'Markdown 편집' : '미리보기'}</button>}
         </div>
-        {tab === 'structured' ? <StrategyForm key={`${s.projectId}:${view.id}:${JSON.stringify(view.strategy ?? null)}`} /> : preview
+        {!OPS_UI_ENABLED && view.strategy && <HiddenStrategyNote has />}
+        {OPS_UI_ENABLED && tab === 'structured' ? <StrategyForm key={`${s.projectId}:${view.id}:${JSON.stringify(view.strategy ?? null)}`} /> : preview
           ? <div aria-label="배포 전략 미리보기">{view.strategyMd ? <MarkdownPreview content={view.strategyMd} /> : <span style={muted}>배포 전략이 비어 있습니다.</span>}</div>
           : <InspectorField label="Markdown — 누가 승인하고, 무엇을 확인하며, 실패하면 어디까지 되돌리는지" value={view.strategyMd ?? ''} multiline rows={16}
               validate={(v) => (new TextEncoder().encode(v).length > STRATEGY_MAX_BYTES ? '배포 전략은 64KB 이하여야 합니다.' : undefined)}
